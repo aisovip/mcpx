@@ -251,12 +251,22 @@ func stripModelRemoteSessionIDs(value any) {
 }
 
 func transparentMCPToolResult(name string, req *mcp.CallToolRequest, result *mcp.CallToolResult) bool {
-	if name != "mcp_tool" || toolAction(req) != "call" || result == nil || result.Meta == nil {
+	if result == nil || result.Meta == nil {
 		return false
 	}
 	serverName, _ := result.Meta[mcpMetaServer].(string)
 	toolName, _ := result.Meta[mcpMetaTool].(string)
-	return strings.TrimSpace(serverName) != "" && strings.TrimSpace(toolName) != ""
+	if strings.TrimSpace(serverName) == "" || strings.TrimSpace(toolName) == "" {
+		return false
+	}
+	switch name {
+	case "mcp_tool":
+		return toolAction(req) == "call"
+	case "computer":
+		return true
+	default:
+		return false
+	}
 }
 
 func firstSemanticPurpose(req envelope.Request) string {

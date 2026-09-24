@@ -119,6 +119,48 @@ func TestComputerHandlerPassesThroughWithoutConfirmation(t *testing.T) {
 	}
 }
 
+func TestComputerToolResultPreservesMixedContent(t *testing.T) {
+	runtime := newWorkspaceRuntime(t, "demo")
+	protocol := mcp.NewServer(&mcp.Implementation{Name: "mcpx-test", Version: "0.1.0"}, nil)
+	runtime.registerTools(protocol)
+
+	principal, err := runtime.principalFromContext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, _ := runtime.reg.Get("demo")
+	created, err := runtime.remote.Create(context.Background(), principal, remotesession.CreateInput{
+		WorkspaceName: "demo", WorkspacePath: registered.Path,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.computerService = &fakeComputerRunner{result: &mcp.CallToolResult{Content: []mcp.Content{
+		&mcp.TextContent{Text: "first output"},
+		&mcp.TextContent{Text: "second output"},
+		&mcp.ImageContent{Data: []byte{0x89, 0x50, 0x4e, 0x47}, MIMEType: "image/png"},
+	}}}
+
+	result := callRawToolResult(t, runtime.toolHandlers["computer"], map[string]any{
+		"remote_session_id": created.Session.ID,
+		"action":            "js",
+		"purpose":           "verify mixed content passthrough",
+		"code":              `nodeRepl.write("first output"); nodeRepl.write("second output");`,
+	})
+	if len(result.Content) != 3 {
+		t.Fatalf("content items = %d, want 3: %+v", len(result.Content), result.Content)
+	}
+	first, _ := result.Content[0].(*mcp.TextContent)
+	second, _ := result.Content[1].(*mcp.TextContent)
+	if first == nil || first.Text != "first output" || second == nil || second.Text != "second output" {
+		t.Fatalf("text content was rewritten: %+v", result.Content)
+	}
+	image, _ := result.Content[2].(*mcp.ImageContent)
+	if image == nil || image.MIMEType != "image/png" || len(image.Data) != 4 {
+		t.Fatalf("image content was rewritten: %+v", result.Content)
+	}
+}
+
 func TestComputerHandlerMapsRuntimeError(t *testing.T) {
 	runtime := newWorkspaceRuntime(t, "demo")
 	principal, err := runtime.principalFromContext(context.Background())
