@@ -220,7 +220,7 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 	expectedTools := []string{
 		"workspace", "session", "read", "edit", "move_out", "observe", "progress",
 		"operation_batch", "operation_manage",
-		"execute", "plan", "artifact", "skill_tool", "mcp_tool", "browser",
+		"execute", "plan", "artifact", "skill_tool", "mcp_tool", "browser", "computer",
 		"runtime_read", "environment_read", "environment", "screenshot_capture", "secret_provide",
 	}
 	if len(byName) != len(expectedTools) {
@@ -241,9 +241,9 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 			t.Fatalf("decode %s: %v", name, err)
 		}
 		rawOutputSchema, hasOutputSchema := listedTool["outputSchema"]
-		if name == "mcp_tool" {
+		if name == "mcp_tool" || name == "computer" {
 			if hasOutputSchema && rawOutputSchema != nil {
-				t.Fatalf("mcp_tool must omit outputSchema: %+v", rawOutputSchema)
+				t.Fatalf("%s must omit outputSchema: %+v", name, rawOutputSchema)
 			}
 		} else {
 			outputSchema, ok := rawOutputSchema.(map[string]any)
@@ -379,7 +379,7 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 
 	needsPurpose := func(name string, args map[string]any) bool {
 		switch name {
-		case "edit", "execute", "plan", "operation_batch", "screenshot_capture", "secret_provide":
+		case "edit", "execute", "plan", "operation_batch", "screenshot_capture", "secret_provide", "computer":
 			return true
 		case "skill_tool", "mcp_tool":
 			return fmt.Sprint(args["action"]) == "call"

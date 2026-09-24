@@ -24,6 +24,7 @@ Edit ID、Task ID 和能力版本避免重复读取和无效重试；Skill/MCP �
 | Extension | Session 建立时曝光 compact inventory，并通过统一 `skill_tool` / `mcp_tool` 按需 list、describe、call |
 | Artifact | 注册、列出和分页读取测试报告、构建产物、覆盖率和日志 |
 | Screenshot | 截取显示器或屏幕区域，并通过 MCP ImageContent 返回 |
+| Computer Use | 通过持久 JavaScript REPL 控制 macOS / Windows 桌面应用；原生动作由 `open-computer-use` 提供 |
 | Security | OAuth、Bearer、Remote Session ACL、命令/文件策略和语义确认 |
 | Observation | 通过本机 Socket 观察工具调用、Task、Edit 和操作事件 |
 
@@ -56,7 +57,7 @@ Runtime 边界内；所有有状态操作都绑定 `remote_session_id`，并通�
 ## 公开工具
 
 `tools/list` 是工具名称、描述、参数 Schema 和 Annotation 的唯一权威来源。
-当前公开工具共 19 个，分为 12 个 core tools 和 7 个 support tools：
+当前公开工具共 21 个，分为 12 个 core tools 和 9 个 support tools：
 
 | 领域 | 工具 | 主要用途 |
 | --- | --- | --- |
@@ -77,12 +78,30 @@ Runtime 边界内；所有有状态操作都绑定 `remote_session_id`，并通�
 | Support | `runtime_read` | 读取运行时能力、项目摘要或适用指令 |
 | Support | `environment_read` | 读取当前主机/工具链环境或比较已保存快照 |
 | Support | `environment` | 保存当前环境快照 |
+| Support | `browser` | 通过官方 Browser Service 控制本机 ChatGPT/Codex 浏览器扩展 |
+| Support | `computer` | 通过持久 `js` / `reset` REPL 控制桌面应用；由模型决定操作，不增加 MCPX 二次审批 |
 | Support | `screenshot_capture` | 按明确 purpose 截取显示器或屏幕区域 |
 | Support | `secret_provide` | 按明确 purpose 提供仅驻留内存的 Secret |
 
 `workspace` 和 `session` 负责发现 Workspace 与建立/恢复会话；进入 Workspace 后，源码变更、命令、
 Plan、Artifact 等有状态操作都以服务端返回的完整 `remote_session_id` 为关联主键。`runtime_read`、
 `environment_read` 等读取型支持工具在参数足够时也可独立读取运行时或环境事实。
+
+### Computer Use 前置依赖
+
+`computer` 复用独立的 [Open Computer Use](https://github.com/iFurySt/open-codex-computer-use) 原生运行时，不在 MCPX 内实现 Accessibility 或 UI Automation。使用前只需安装：
+
+```bash
+npm i -g open-computer-use
+```
+
+该 npm 包包含 macOS、Windows 原生 runtime，要求 Node.js 18+，最低版本为 `open-computer-use@0.3.5`。macOS 首次使用需执行一次权限检查并授予 Accessibility 与 Screen Recording；Windows 必须在已登录桌面会话中运行。
+
+```bash
+open-computer-use doctor
+```
+
+MCPX 会自动启动并持有 `open-computer-use mcp` 进程，无需额外安装 JS adapter。也可通过 `MCPX_COMPUTER_USE_BINARY` 和 `MCPX_COMPUTER_USE_NODE` 显式指定可执行文件。
 
 ## 设计边界
 
@@ -859,7 +878,7 @@ ARC 内容仍先显示 `Read`、`Edited`、`Ran`、`Searched` 等语义动作，
 
 ```text
 cmd/mcpx-server       服务入口、后台模式、observe、workspace、oauth-register 和 update
-internal/server       HTTP Gateway、20 个公开工具、Resource、capability 与协议适配
+internal/server       HTTP Gateway、21 个公开工具、Resource、capability 与协议适配
 internal/desktop      Windows 托盘、图形界面与其 /api 处理器（非 Windows 为占位实现）
 internal/arc          ARC 2.0 结果契约、structuredContent、呈现与 trace metadata
 internal/remotesession Remote Session、角色、handoff 与持久化事件

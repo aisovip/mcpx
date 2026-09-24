@@ -107,6 +107,14 @@ var browserToolAnnotation = toolAnnotation{
 	}},
 }
 
+var computerToolAnnotation = toolAnnotation{
+	ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true,
+	Meta: mcp.Meta{"mcpx/action_risk": map[string]any{
+		"js":    riskDescriptor(false, true, false, true, "local_desktop_ui_dynamic_risk"),
+		"reset": riskDescriptor(false, false, true, false, "local_computer_session_reset"),
+	}},
+}
+
 func riskDescriptor(readOnly, destructive, idempotent, openWorld bool, classification string) map[string]any {
 	return map[string]any{
 		"read_only": readOnly, "destructive": destructive, "idempotent": idempotent,

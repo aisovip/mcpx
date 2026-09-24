@@ -57,7 +57,7 @@ func (r *Runtime) addTool(s *mcp.Server, tool mcp.Tool, handler mcp.ToolHandler)
 }
 
 func outputSchemaForTool(toolName string) json.RawMessage {
-	if toolName == "mcp_tool" {
+	if toolName == "mcp_tool" || toolName == "computer" {
 		return nil
 	}
 	limits, hasLimits := publishedLimits()[toolName]

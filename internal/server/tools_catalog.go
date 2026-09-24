@@ -526,6 +526,19 @@ func (r *Runtime) registerConsolidatedToolsCatalog(s *mcp.Server) {
 	}
 	r.addTool(s, cleanActionTool("browser", toolDesc["browser"], browserCommon, browserBranches, browserToolAnnotation), r.toolBrowser)
 
+	computerCommon := map[string]any{
+		"remote_session_id": remoteSession,
+		"purpose":           stringSchema("桌面操作的明确用户目标和预期副作用；用于审计，不触发 MCPX confirmation"),
+		"code":              map[string]any{"type": "string", "minLength": 1, "description": "在持久 REPL 中执行的 JavaScript；支持 top-level await 和 cua API"},
+		"title":             map[string]any{"type": "string", "minLength": 1, "maxLength": 80, "description": "本次 JS 执行的简短用户可见说明"},
+		"timeout_ms":        map[string]any{"type": "integer", "minimum": 1, "maximum": 300000, "description": "JS 执行超时；默认 30000，最大 300000 毫秒"},
+	}
+	computerBranches := map[string]actionSchemaBranch{
+		"js":    {Description: "在持久 Computer Use JavaScript REPL 中执行代码；绑定在同一 Remote Session 内保留。", Required: []string{"remote_session_id", "purpose", "code"}},
+		"reset": {Description: "清空当前 Remote Session 的 JS bindings 与 adapter 状态；不关闭目标应用。", Required: []string{"remote_session_id", "purpose"}},
+	}
+	r.addTool(s, cleanActionTool("computer", toolDesc["computer"], computerCommon, computerBranches, computerToolAnnotation), r.toolComputer)
+
 	r.addTool(s, supportTool("screenshot_capture", toolDesc["screenshot_capture"], map[string]any{
 		"remote_session_id": remoteSession, "purpose": stringSchema("截取屏幕的用户目标和范围"),
 		"mode": stringSchema("全屏或区域"), "display": numberSchema("显示器索引"),

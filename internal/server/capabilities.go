@@ -52,7 +52,7 @@ func clientProtocolRevision() string { return hashRevision(clientProtocolCapabil
 func capabilityGroups() map[string][]string {
 	return map[string][]string{
 		"core":    {"workspace", "session", "read", "edit", "move_out", "observe", "progress", "execute", "plan", "artifact", "skill_tool", "mcp_tool"},
-		"support": {"operation_batch", "operation_manage", "runtime_read", "environment_read", "environment", "browser", "screenshot_capture", "secret_provide"},
+		"support": {"operation_batch", "operation_manage", "runtime_read", "environment_read", "environment", "browser", "computer", "screenshot_capture", "secret_provide"},
 	}
 }
 
@@ -88,6 +88,7 @@ var toolCapabilityDefinitions = []toolCapabilityDefinition{
 	{Name: "environment_read", Domain: "environment"},
 	{Name: "environment", Domain: "environment", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}},
 	{Name: "browser", Domain: "browser", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}},
+	{Name: "computer", Domain: "computer", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}},
 	{Name: "screenshot_capture", Domain: "screenshot", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}},
 	{Name: "secret_provide", Domain: "secrets", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}},
 }

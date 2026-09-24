@@ -19,6 +19,7 @@ Development state is stored in SQLite-backed Remote Sessions. It is independent 
 | **Project Task** | Discover project-defined test, build, and check tasks and parse structured diagnostics. |
 | **Environment** | Inspect OS, architecture, kernel, display, container, shell, resources, filesystem, and toolchain. |
 | **Extensions** | Proxy upstream MCP servers and discover or execute local Skills. |
+| **Computer Use** | Control macOS and Windows desktop apps through a persistent JavaScript REPL backed by the independent Open Computer Use runtime. |
 | **Security and Audit** | OAuth / Bearer authentication, principals, session ACLs, command and file policies, approvals, and JSONL audit logs. |
 
 ## Quick start
@@ -133,9 +134,11 @@ curl -sS -m 5 \
 
 ## Tool surface
 
-`tools/list` is the authoritative source for tool names, descriptions, input schemas, and annotations. The current public surface contains 18 tools: 11 core tools and 7 support tools.
+`tools/list` is the authoritative source for tool names, descriptions, input schemas, and annotations. The current public surface contains 21 tools: 12 core tools and 9 support tools.
 
-The core tools are `session`, `read`, `edit`, `move_out`, `observe`, `execute`, `plan`, `artifact`, `discover`, `skill_call`, and `mcp_call`. The support tools are `operation_batch`, `operation_manage`, `runtime_read`, `environment_read`, `environment`, `screenshot_capture`, and `secret_provide`.
+The core tools are `workspace`, `session`, `read`, `edit`, `move_out`, `observe`, `progress`, `execute`, `plan`, `artifact`, `skill_tool`, and `mcp_tool`. The support tools are `operation_batch`, `operation_manage`, `runtime_read`, `environment_read`, `environment`, `browser`, `computer`, `screenshot_capture`, and `secret_provide`.
+
+`computer` requires Node.js 18+ and the independent `open-computer-use` runtime (`0.3.5+`). Install it with `npm i -g open-computer-use`; on macOS run `open-computer-use doctor` once and grant Accessibility and Screen Recording. MCPX starts and owns the long-lived `open-computer-use mcp` child process. Windows requires an active logged-in desktop session.
 
 All stateful tools use the full `remote_session_id`. The normal source-edit workflow is:
 

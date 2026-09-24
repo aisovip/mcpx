@@ -22,6 +22,7 @@ import (
 	"mcpx/internal/audit"
 	"mcpx/internal/auth"
 	"mcpx/internal/browseruse"
+	"mcpx/internal/computeruse"
 	"mcpx/internal/config"
 	"mcpx/internal/deletion"
 	"mcpx/internal/envelope"
@@ -76,6 +77,8 @@ type Runtime struct {
 	retentionDone    chan struct{}
 	screenshot       screenCapturer
 	browserService   *browseruse.Service
+	computerMu       sync.Mutex
+	computerService  computerRunner
 	observation      *observationBridge
 	operations       *operation.Service
 	observerSocket   *observation.SocketServer
@@ -234,32 +237,33 @@ func New(opts Options) (*Runtime, error) {
 	}
 
 	runtime := &Runtime{
-		opts:           opts,
-		cfg:            cfg,
-		reg:            reg,
-		approvals:      approval.NewPersistentStore(stateStore.DB()),
-		audit:          logger,
-		globalCfgPath:  globalPath,
-		tasks:          taskManager,
-		secrets:        secrets.NewPersistentStore(stateStore.DB()),
-		oauth:          oauthSrv,
-		state:          stateStore,
-		remote:         remotesession.NewService(stateStore.DB()),
-		environment:    environmentService,
-		workspaceDiff:  workspacechanges.NewService(stateStore.DB()),
-		fileSnapshots:  filesnapshot.NewStore(stateStore.DB()),
-		artifacts:      artifact.NewService(stateStore.DB()),
-		plans:          plan.NewService(stateStore.DB()),
-		deletions:      deletion.NewStore(stateStore.DB()),
-		retention:      retentionService,
-		screenshot:     screenshot.NewService(),
-		browserService: browseruse.NewService(),
-		toolIndex:      map[string]mcp.Tool{},
-		toolHandlers:   map[string]mcp.ToolHandler{},
-		toolMeta:       map[string]toolAnnotation{},
-		idempotency:    idempotency.NewStore(stateStore.DB()),
-		discoveries:    map[string]discoveryLease{},
-		projectConfigs: map[string]projectConfigCacheEntry{},
+		opts:            opts,
+		cfg:             cfg,
+		reg:             reg,
+		approvals:       approval.NewPersistentStore(stateStore.DB()),
+		audit:           logger,
+		globalCfgPath:   globalPath,
+		tasks:           taskManager,
+		secrets:         secrets.NewPersistentStore(stateStore.DB()),
+		oauth:           oauthSrv,
+		state:           stateStore,
+		remote:          remotesession.NewService(stateStore.DB()),
+		environment:     environmentService,
+		workspaceDiff:   workspacechanges.NewService(stateStore.DB()),
+		fileSnapshots:   filesnapshot.NewStore(stateStore.DB()),
+		artifacts:       artifact.NewService(stateStore.DB()),
+		plans:           plan.NewService(stateStore.DB()),
+		deletions:       deletion.NewStore(stateStore.DB()),
+		retention:       retentionService,
+		screenshot:      screenshot.NewService(),
+		browserService:  browseruse.NewService(),
+		computerService: computeruse.NewService(),
+		toolIndex:       map[string]mcp.Tool{},
+		toolHandlers:    map[string]mcp.ToolHandler{},
+		toolMeta:        map[string]toolAnnotation{},
+		idempotency:     idempotency.NewStore(stateStore.DB()),
+		discoveries:     map[string]discoveryLease{},
+		projectConfigs:  map[string]projectConfigCacheEntry{},
 		build: BuildInfo{
 			Version: firstNonEmpty(opts.Version, buildversion.Current),
 			Commit:  firstNonEmpty(opts.Commit, "none"),
@@ -485,6 +489,11 @@ func (r *Runtime) Close() error {
 		}
 		if r.browserService != nil {
 			if err := r.browserService.Close(); err != nil && r.closeErr == nil {
+				r.closeErr = err
+			}
+		}
+		if r.computerService != nil {
+			if err := r.computerService.Close(); err != nil && r.closeErr == nil {
 				r.closeErr = err
 			}
 		}

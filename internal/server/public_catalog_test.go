@@ -115,7 +115,7 @@ func TestPublicCatalogIsExactlyTheCleanCoreContract(t *testing.T) {
 	want := []string{
 		"workspace", "session", "read", "edit", "move_out", "observe", "progress",
 		"operation_batch", "operation_manage",
-		"execute", "plan", "artifact", "skill_tool", "mcp_tool", "browser",
+		"execute", "plan", "artifact", "skill_tool", "mcp_tool", "browser", "computer",
 		"runtime_read", "environment_read", "environment", "screenshot_capture", "secret_provide",
 	}
 	got := make([]string, 0, len(runtime.listedToolMap()))
@@ -134,9 +134,9 @@ func TestPublicCatalogIsExactlyTheCleanCoreContract(t *testing.T) {
 	}
 
 	for name, registered := range runtime.listedToolMap() {
-		if name == "mcp_tool" {
+		if name == "mcp_tool" || name == "computer" {
 			if registered.OutputSchema != nil {
-				t.Fatalf("mcp_tool must omit OutputSchema: %+v", registered.OutputSchema)
+				t.Fatalf("%s must omit OutputSchema: %+v", name, registered.OutputSchema)
 			}
 		} else if registered.OutputSchema == nil {
 			t.Fatalf("%s must expose the ARC structuredContent output schema", name)
