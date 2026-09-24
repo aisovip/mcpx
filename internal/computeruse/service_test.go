@@ -2,7 +2,9 @@ package computeruse
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -128,6 +130,215 @@ func TestServiceParsesHumanReadableListApps(t *testing.T) {
 		if !strings.Contains(text, fragment) {
 			t.Fatalf("listApps output missing %s: %s", fragment, text)
 		}
+	}
+}
+
+func TestServiceDragPathFallsBackToMultipleDrags(t *testing.T) {
+	service, ctx := newFakeService(t)
+	logPath := t.TempDir() + "/drag.jsonl"
+	t.Setenv("MCPX_FAKE_DRAG_LOG", logPath)
+
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `const app = await cua.getApp("Fake App"); const drawn = await app.dragPath({ points: [[10, 20], [30, 40], [50, 30]], durationMs: 600 }); nodeRepl.write(JSON.stringify(drawn));`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.IsError || !strings.Contains(resultText(result), `"mode":"multi_drag"`) || !strings.Contains(resultText(result), `"segments":2`) {
+		t.Fatalf("dragPath fallback result = %+v text=%q", result, resultText(result))
+	}
+	drags := readDragLog(t, logPath)
+	if len(drags) != 2 {
+		t.Fatalf("drag calls = %d, want 2: %+v", len(drags), drags)
+	}
+	assertDrag(t, drags[0], 10, 20, 30, 40)
+	assertDrag(t, drags[1], 30, 40, 50, 30)
+}
+
+func TestServiceDragPathSamplesCurveFunction(t *testing.T) {
+	service, ctx := newFakeService(t)
+	logPath := t.TempDir() + "/drag.jsonl"
+	t.Setenv("MCPX_FAKE_DRAG_LOG", logPath)
+
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `const app = await cua.getApp("Fake App"); const drawn = await app.dragPath({ from: [0, 0], to: [40, 0], steps: 4, curve: (t, from, to) => [from[0] + (to[0] - from[0]) * t, Math.sin(Math.PI * t) * 10] }); nodeRepl.write(JSON.stringify(drawn));`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.IsError || !strings.Contains(resultText(result), `"segments":4`) {
+		t.Fatalf("dragPath curve result = %+v text=%q", result, resultText(result))
+	}
+	drags := readDragLog(t, logPath)
+	if len(drags) != 4 {
+		t.Fatalf("drag calls = %d, want 4: %+v", len(drags), drags)
+	}
+	assertDragNear(t, drags[0], 0, 0, 10, math.Sin(math.Pi/4)*10)
+	assertDragNear(t, drags[3], 30, math.Sin(math.Pi/4)*10, 40, 0)
+}
+
+func TestServiceDragPathUsesNativeDragPathWhenAvailable(t *testing.T) {
+	service, ctx := newFakeService(t)
+	dragPathLog := t.TempDir() + "/drag-path.jsonl"
+	dragLog := t.TempDir() + "/drag.jsonl"
+	t.Setenv("MCPX_FAKE_DRAG_PATH", "1")
+	t.Setenv("MCPX_FAKE_DRAG_PATH_LOG", dragPathLog)
+	t.Setenv("MCPX_FAKE_DRAG_LOG", dragLog)
+
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `const app = await cua.getApp("Fake App"); const drawn = await app.dragPath({ points: [[0, 0], [10, 5], [20, 0]], durationMs: 900, mouseButton: "left", delivery: "app_post" }); nodeRepl.write(JSON.stringify(drawn));`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.IsError || !strings.Contains(resultText(result), `"mode":"drag_path"`) {
+		t.Fatalf("native drag_path result = %+v text=%q", result, resultText(result))
+	}
+	entries := readToolLog(t, dragPathLog)
+	if len(entries) != 1 {
+		t.Fatalf("drag_path calls = %d, want 1: %+v", len(entries), entries)
+	}
+	arguments, _ := entries[0]["arguments"].(map[string]any)
+	points, _ := arguments["points"].([]any)
+	if len(points) != 3 || arguments["duration_ms"] != float64(900) || arguments["mouse_button"] != "left" || arguments["delivery"] != "app_post" {
+		t.Fatalf("drag_path arguments = %+v", arguments)
+	}
+	if _, err := os.Stat(dragLog); !os.IsNotExist(err) {
+		t.Fatalf("native drag_path must not fall back to drag: %v", err)
+	}
+}
+
+func TestServiceDragPathDefaultsTo256WithNativeDragPath(t *testing.T) {
+	service, ctx := newFakeService(t)
+	dragPathLog := t.TempDir() + "/drag-path.jsonl"
+	t.Setenv("MCPX_FAKE_DRAG_PATH", "1")
+	t.Setenv("MCPX_FAKE_DRAG_PATH_LOG", dragPathLog)
+
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `const app = await cua.getApp("Fake App"); const drawn = await app.dragPath({ from: [0, 0], to: [10, 0], curve: (t, from, to) => [from[0] + (to[0] - from[0]) * t, Math.sin(Math.PI * t) * 2] }); nodeRepl.write(JSON.stringify(drawn));`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.IsError || !strings.Contains(resultText(result), `"segments":256`) {
+		t.Fatalf("default dragPath result = %+v text=%q", result, resultText(result))
+	}
+	entries := readToolLog(t, dragPathLog)
+	if len(entries) != 1 {
+		t.Fatalf("drag_path calls = %d, want 1: %+v", len(entries), entries)
+	}
+	arguments, _ := entries[0]["arguments"].(map[string]any)
+	points, _ := arguments["points"].([]any)
+	if len(points) != 257 {
+		t.Fatalf("default drag_path points = %d, want 257", len(points))
+	}
+}
+
+func TestServiceDragPathRejectsManySegmentsWithoutNativeSupport(t *testing.T) {
+	service, ctx := newFakeService(t)
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `const app = await cua.getApp("Fake App"); await app.dragPath({ from: [0, 0], to: [10, 0], steps: 256, curve: (t, from, to) => [from[0] + (to[0] - from[0]) * t, 0] });`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || !result.IsError || !strings.Contains(resultText(result), "requires native drag_path") {
+		t.Fatalf("many-segment fallback result = %+v text=%q", result, resultText(result))
+	}
+}
+
+func TestServiceDragPathRejectsInvalidCurvePoint(t *testing.T) {
+	service, ctx := newFakeService(t)
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `const app = await cua.getApp("Fake App"); await app.dragPath({ from: [0, 0], to: [10, 0], steps: 2, curve: () => [NaN, 0] });`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || !result.IsError || !strings.Contains(resultText(result), "finite number") {
+		t.Fatalf("invalid curve result = %+v", result)
+	}
+}
+
+func TestServiceKeyboardWrappers(t *testing.T) {
+	service, ctx := newFakeService(t)
+	keyLog := t.TempDir() + "/keys.jsonl"
+	t.Setenv("MCPX_FAKE_KEY_LOG", keyLog)
+
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code: `const app = await cua.getApp("Fake App");
+await app.hotkey("cmd", "shift", "p");
+await app.typeText("hello", { submit: true });
+await app.keySequence([
+  { key: "cmd+a" },
+  { text: "MCPX" },
+  { sleepMs: 1 },
+  { key: "Return" }
+], { delayMs: 1 });
+nodeRepl.write("keyboard-ok");`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.IsError || !strings.Contains(resultText(result), "keyboard-ok") {
+		t.Fatalf("keyboard result = %+v", result)
+	}
+	entries := readToolLog(t, keyLog)
+	want := []struct {
+		tool string
+		key  string
+		text string
+	}{
+		{tool: "press_key", key: "cmd+shift+p"},
+		{tool: "type_text", text: "hello"},
+		{tool: "press_key", key: "Return"},
+		{tool: "press_key", key: "cmd+a"},
+		{tool: "type_text", text: "MCPX"},
+		{tool: "press_key", key: "Return"},
+	}
+	if len(entries) != len(want) {
+		t.Fatalf("keyboard calls = %d, want %d: %+v", len(entries), len(want), entries)
+	}
+	for index, expected := range want {
+		arguments, _ := entries[index]["arguments"].(map[string]any)
+		if entries[index]["tool"] != expected.tool {
+			t.Fatalf("keyboard call %d = %+v, want %+v", index, entries[index], expected)
+		}
+		if expected.key != "" && arguments["key"] != expected.key {
+			t.Fatalf("keyboard key %d = %+v, want %q", index, entries[index], expected.key)
+		}
+		if expected.text != "" && arguments["text"] != expected.text {
+			t.Fatalf("keyboard text %d = %+v, want %q", index, entries[index], expected.text)
+		}
+	}
+}
+
+func TestServiceRejectsInvalidDragPathPoints(t *testing.T) {
+	service, ctx := newFakeService(t)
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `const app = await cua.getApp("Fake App"); await app.dragPath({ points: [[0, 0]] });`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || !result.IsError || !strings.Contains(resultText(result), "at least two points") {
+		t.Fatalf("invalid dragPath result = %+v", result)
 	}
 }
 
@@ -302,6 +513,58 @@ func resultText(result *mcp.CallToolResult) string {
 		}
 	}
 	return strings.Join(values, "\n")
+}
+
+func readDragLog(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	result := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		var args map[string]any
+		if err := json.Unmarshal([]byte(line), &args); err != nil {
+			t.Fatalf("decode drag log %q: %v", line, err)
+		}
+		result = append(result, args)
+	}
+	return result
+}
+
+func readToolLog(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	result := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("decode tool log %q: %v", line, err)
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
+func assertDrag(t *testing.T, args map[string]any, fromX, fromY, toX, toY float64) {
+	t.Helper()
+	assertDragNear(t, args, fromX, fromY, toX, toY)
+}
+
+func assertDragNear(t *testing.T, args map[string]any, fromX, fromY, toX, toY float64) {
+	t.Helper()
+	for key, want := range map[string]float64{
+		"from_x": fromX, "from_y": fromY, "to_x": toX, "to_y": toY,
+	} {
+		if got, ok := args[key].(float64); !ok || math.Abs(got-want) > 1e-9 {
+			t.Fatalf("drag %s = %v, want %v: %+v", key, args[key], want, args)
+		}
+	}
 }
 
 func fakeNativeMCP(t *testing.T) string {

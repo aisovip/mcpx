@@ -15,6 +15,15 @@ import readline from "node:readline";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 300_000;
 const NATIVE_REQUEST_TIMEOUT_MS = 120_000;
+const DEFAULT_NATIVE_DRAG_SEGMENTS = 256;
+const DEFAULT_FALLBACK_DRAG_SEGMENTS = 24;
+const MAX_DRAG_SEGMENTS = 256;
+const MAX_FALLBACK_DRAG_SEGMENTS = 64;
+const DEFAULT_DRAG_DURATION_MS = 800;
+const MIN_DRAG_DURATION_MS = 50;
+const MAX_DRAG_DURATION_MS = 10_000;
+const MAX_DELAY_MS = 1_000;
+const MAX_KEY_SEQUENCE_STEPS = 256;
 const CUA_GUIDANCE = `Computer Use JavaScript API:
 - await cua.listApps({ emit?: false })
 - const app = await cua.getApp("App Name")
@@ -26,6 +35,10 @@ const CUA_GUIDANCE = `Computer Use JavaScript API:
 - await app.setValue(elementIndex, value)
 - await app.scroll(elementIndex, direction, pages?)
 - await app.drag([fromX, fromY], [toX, toY])
+- await app.dragPath({ points: [[x, y], ...], durationMs?, mouseButton?, delivery? })
+- await app.dragPath({ from, to, curve, steps?, durationMs?, mouseButton?, delivery? })
+- await app.hotkey("cmd", "shift", "p")
+- await app.keySequence([{ key: "cmd+a" }, { text: "hello" }, { key: "Return" }], { delayMs? })
 - await app.performSecondaryAction(elementIndex, action)`;
 
 async function runServer(binaryPath) {
@@ -34,7 +47,7 @@ async function runServer(binaryPath) {
   }
   const native = new NativePeer(binaryPath.trim());
   await native.initialize();
-  const session = new WorkerJavaScriptSession(native);
+  const session = new WorkerJavaScriptSession(native, native.toolNames);
   const server = new MCPStdioServer(session);
 
   const shutdown = async () => {
@@ -160,6 +173,7 @@ class NativePeer {
     this.command = command;
     this.nextID = 1;
     this.pending = new Map();
+    this.toolNames = new Set();
     this.closing = false;
     const native = resolveNativeCommand(command);
     this.child = spawn(native.command, native.args, {
@@ -181,6 +195,22 @@ class NativePeer {
       clientInfo: { name: "mcpx-computer-use-repl", version: "1" },
     });
     this.notify("notifications/initialized", {});
+    try {
+      const listed = await this.request("tools/list", {});
+      this.toolNames = new Set(
+        (Array.isArray(listed?.tools) ? listed.tools : [])
+          .map((tool) => tool?.name)
+          .filter((name) => typeof name === "string" && name !== ""),
+      );
+    } catch {
+      // Capability discovery is best-effort. Adapters must keep working with
+      // native servers that do not implement tools/list reliably.
+      this.toolNames = new Set();
+    }
+  }
+
+  hasTool(name) {
+    return this.toolNames.has(name);
   }
 
   request(method, params, timeoutMs = NATIVE_REQUEST_TIMEOUT_MS) {
@@ -258,8 +288,9 @@ function resolveNativeCommand(binaryPath) {
 }
 
 class WorkerJavaScriptSession {
-  constructor(native) {
+  constructor(native, tools = new Set()) {
     this.native = native;
+    this.tools = [...tools];
     this.nextID = 1;
     this.pending = new Map();
     this.queue = Promise.resolve();
@@ -267,7 +298,7 @@ class WorkerJavaScriptSession {
   }
 
   #start() {
-    const worker = new Worker(new URL(import.meta.url), { workerData: { mode: "kernel" } });
+    const worker = new Worker(new URL(import.meta.url), { workerData: { mode: "kernel", tools: this.tools } });
     this.worker = worker;
     worker.on("message", (message) => void this.#handleMessage(worker, message));
     worker.on("error", (error) => this.#failWorker(worker, error));
@@ -350,9 +381,13 @@ function errorResult(error) {
 }
 
 function runKernel() {
+  const toolNames = new Set(Array.isArray(workerData?.tools) ? workerData.tools : []);
   const native = {
     nextID: 1,
     pending: new Map(),
+    hasTool(name) {
+      return toolNames.has(name);
+    },
     request(method, params, timeoutMs) {
       const id = this.nextID++;
       return new Promise((resolve, reject) => {
@@ -480,7 +515,119 @@ function createCuaAPI(native, activeOutput) {
       await activeOutput().emitImage({ bytes: Buffer.from(image.data ?? "", "base64"), mimeType: image.mimeType ?? "image/png" });
     }
   }
+
   function appBinding(app) {
+    async function pressKey(key) {
+      const normalized = normalizeKeySpec(key);
+      await call("press_key", { app, key: normalized });
+      return { key: normalized };
+    }
+
+    async function typeText(text, options) {
+      if (typeof text !== "string") throw new Error("typeText text must be a string");
+      const normalizedOptions = normalizeTextOptions(options);
+      if (normalizedOptions.focus !== undefined) {
+        const focus = normalizedOptions.focus;
+        if (Array.isArray(focus)) {
+          const point = parseDrawPoint(focus, "typeText.focus");
+          await call("click", { app, x: point[0], y: point[1] });
+        } else if (typeof focus === "string" || typeof focus === "number") {
+          await call("click", { app, element_index: String(focus) });
+        } else {
+          throw new Error("typeText.focus must be an element index or [x, y]");
+        }
+      }
+      await call("type_text", { app, text });
+      if (normalizedOptions.submit) await pressKey("Return");
+      return { characters: [...text].length, submitted: normalizedOptions.submit };
+    }
+
+    async function hotkey(...keys) {
+      const normalized = normalizeHotkey(keys);
+      await pressKey(normalized);
+      return { key: normalized };
+    }
+
+    async function keySequence(sequence, options) {
+      if (!Array.isArray(sequence) || sequence.length === 0) {
+        throw new Error("keySequence must contain at least one step");
+      }
+      if (sequence.length > MAX_KEY_SEQUENCE_STEPS) {
+        throw new Error(`keySequence supports at most ${MAX_KEY_SEQUENCE_STEPS} steps`);
+      }
+      const normalizedOptions = normalizeTextOptions(options);
+      const delayMs = normalizeDelayMs(normalizedOptions.delayMs);
+      for (let index = 0; index < sequence.length; index++) {
+        const step = sequence[index];
+        if (typeof step === "string") {
+          await pressKey(step);
+        } else if (step && typeof step === "object" && !Array.isArray(step)) {
+          const fields = ["key", "text", "sleepMs"].filter((field) => step[field] !== undefined);
+          if (fields.length !== 1) {
+            throw new Error(`keySequence[${index}] must set exactly one of key, text, or sleepMs`);
+          }
+          if (step.key !== undefined) await pressKey(step.key);
+          else if (step.text !== undefined) await typeText(String(step.text));
+          else await sleep(normalizeDelayMs(step.sleepMs));
+        } else {
+          throw new Error(`keySequence[${index}] must be a string or an object`);
+        }
+        if (delayMs > 0 && index < sequence.length - 1) await sleep(delayMs);
+      }
+      return { steps: sequence.length };
+    }
+
+    async function dragPath(options) {
+      if (!options || typeof options !== "object" || Array.isArray(options)) {
+        throw new Error("dragPath options must be an object");
+      }
+      const defaultSegments = native.hasTool("drag_path") ? DEFAULT_NATIVE_DRAG_SEGMENTS : DEFAULT_FALLBACK_DRAG_SEGMENTS;
+      const points = await resolveDragPathPoints(options, defaultSegments);
+      const durationMs = normalizeDragDuration(options.durationMs);
+      const mouseButton = normalizeMouseButton(options.mouseButton);
+      const delivery = normalizeDelivery(options.delivery);
+
+      if (native.hasTool("drag_path")) {
+        await call("drag_path", {
+          app,
+          points: points.map(([x, y]) => ({ x, y })),
+          duration_ms: durationMs,
+          mouse_button: mouseButton,
+          delivery,
+        });
+        return {
+          mode: "drag_path",
+          segments: points.length - 1,
+          points,
+          durationMs,
+          mouseButton,
+          delivery,
+        };
+      }
+
+      if (mouseButton !== "left") {
+        throw new Error("dragPath fallback only supports the left mouse button; native drag_path is required");
+      }
+      if (points.length - 1 > MAX_FALLBACK_DRAG_SEGMENTS) {
+        throw new Error(`dragPath with more than ${MAX_FALLBACK_DRAG_SEGMENTS} segments requires native drag_path`);
+      }
+      const delayMs = normalizeDelayMs(options.delayMs);
+      for (let index = 1; index < points.length; index++) {
+        const from = points[index - 1];
+        const to = points[index];
+        await call("drag", { app, from_x: from[0], from_y: from[1], to_x: to[0], to_y: to[1] });
+        if (delayMs > 0 && index < points.length - 1) await sleep(delayMs);
+      }
+      return {
+        mode: "multi_drag",
+        segments: points.length - 1,
+        points,
+        durationMs: null,
+        mouseButton,
+        delivery: "app_post",
+      };
+    }
+
     return Object.freeze({
       async getAXState(options = {}) {
         const result = await call("get_app_state", { app, ...snapshotArgs(options) });
@@ -508,11 +655,15 @@ function createCuaAPI(native, activeOutput) {
         await call("click", { app, ...targetArgs, ...clickArgs(options) });
       },
       async drag(from, to) {
-        await call("drag", { app, from_x: from[0], from_y: from[1], to_x: to[0], to_y: to[1] });
+        const start = parseDrawPoint(from, "drag.from");
+        const end = parseDrawPoint(to, "drag.to");
+        await call("drag", { app, from_x: start[0], from_y: start[1], to_x: end[0], to_y: end[1] });
       },
-      async pressKey(key) {
-        await call("press_key", { app, key });
-      },
+      dragPath,
+      hotkey,
+      keySequence,
+      pressKey,
+      typeText,
       async scroll(target, direction, pages = 1) {
         if (Array.isArray(target)) throw new Error("coordinate scroll is not supported");
         await call("scroll", { app, element_index: target, direction, pages });
@@ -520,14 +671,12 @@ function createCuaAPI(native, activeOutput) {
       async setValue(elementIndex, value) {
         await call("set_value", { app, element_index: elementIndex, value });
       },
-      async typeText(text) {
-        await call("type_text", { app, text });
-      },
       async performSecondaryAction(elementIndex, action) {
         await call("perform_secondary_action", { app, element_index: elementIndex, action });
       },
     });
   }
+
   return Object.freeze({
     async getState(options = {}) {
       await emitDocs();
@@ -555,6 +704,201 @@ function createCuaAPI(native, activeOutput) {
       return appBinding(app);
     },
   });
+}
+
+async function resolveDragPathPoints(options, defaultSegments) {
+  if (options.points !== undefined) {
+    if (options.from !== undefined || options.to !== undefined || options.curve !== undefined) {
+      throw new Error("dragPath accepts either points or from/to with curve, not both");
+    }
+    return normalizePathPoints(options.points);
+  }
+  const from = parseDrawPoint(options.from, "dragPath.from");
+  const to = parseDrawPoint(options.to, "dragPath.to");
+  const segments = normalizeDragSegments(options.steps, defaultSegments);
+  if (typeof options.curve === "function") {
+    return sampleCurveFunction(options.curve, from, to, segments);
+  }
+  const curve = options.curve === undefined || options.curve === null ? "line" : String(options.curve).toLowerCase();
+  switch (curve) {
+    case "line":
+      return sampleLine(from, to, segments);
+    case "quadratic": {
+      const control = parseDrawPoint(options.control, "dragPath.control");
+      return sampleQuadraticBezier(from, control, to, segments);
+    }
+    case "cubic": {
+      const control1 = parseDrawPoint(options.control1, "dragPath.control1");
+      const control2 = parseDrawPoint(options.control2, "dragPath.control2");
+      return sampleCubicBezier(from, control1, control2, to, segments);
+    }
+    default:
+      throw new Error(`unsupported dragPath curve ${JSON.stringify(options.curve)}`);
+  }
+}
+
+async function sampleCurveFunction(curve, from, to, segments) {
+  const points = [];
+  for (let index = 0; index <= segments; index++) {
+    const progress = index / segments;
+    const value = await curve(progress, [...from], [...to]);
+    points.push(parseDrawPoint(value, `dragPath.curve(${progress})`));
+  }
+  points[0] = [...from];
+  points[points.length - 1] = [...to];
+  return points;
+}
+
+function sampleLine(from, to, segments) {
+  const points = [];
+  for (let index = 0; index <= segments; index++) {
+    const progress = index / segments;
+    points.push([
+      from[0] + (to[0] - from[0]) * progress,
+      from[1] + (to[1] - from[1]) * progress,
+    ]);
+  }
+  return points;
+}
+
+function sampleQuadraticBezier(from, control, to, segments) {
+  const points = [];
+  for (let index = 0; index <= segments; index++) {
+    const progress = index / segments;
+    const inverse = 1 - progress;
+    points.push([
+      inverse ** 2 * from[0] + 2 * inverse * progress * control[0] + progress ** 2 * to[0],
+      inverse ** 2 * from[1] + 2 * inverse * progress * control[1] + progress ** 2 * to[1],
+    ]);
+  }
+  return points;
+}
+
+function sampleCubicBezier(from, control1, control2, to, segments) {
+  const points = [];
+  for (let index = 0; index <= segments; index++) {
+    points.push(cubicBezierPoint(from, control1, control2, to, index / segments));
+  }
+  return points;
+}
+
+function cubicBezierPoint(from, control1, control2, to, progress) {
+  const inverse = 1 - progress;
+  const fromWeight = inverse ** 3;
+  const control1Weight = 3 * inverse ** 2 * progress;
+  const control2Weight = 3 * inverse * progress ** 2;
+  const toWeight = progress ** 3;
+  return [
+    from[0] * fromWeight + control1[0] * control1Weight + control2[0] * control2Weight + to[0] * toWeight,
+    from[1] * fromWeight + control1[1] * control1Weight + control2[1] * control2Weight + to[1] * toWeight,
+  ];
+}
+
+function normalizePathPoints(points) {
+  if (!Array.isArray(points) || points.length < 2) {
+    throw new Error("dragPath points must contain at least two points");
+  }
+  if (points.length - 1 > MAX_DRAG_SEGMENTS) {
+    throw new Error(`dragPath supports at most ${MAX_DRAG_SEGMENTS} segments`);
+  }
+  return points.map((point, index) => parseDrawPoint(point, `dragPath.points[${index}]`));
+}
+
+function parseDrawPoint(value, label) {
+  let point;
+  if (Array.isArray(value) && value.length === 2) {
+    point = [value[0], value[1]];
+  } else if (value && typeof value === "object" && "x" in value && "y" in value) {
+    point = [value.x, value.y];
+  } else {
+    throw new Error(`${label} must be [x, y] or { x, y }`);
+  }
+  for (const [index, coordinate] of point.entries()) {
+    if (typeof coordinate !== "number" || !Number.isFinite(coordinate)) {
+      throw new Error(`${label}[${index}] must be a finite number`);
+    }
+  }
+  return point;
+}
+
+function normalizeDragSegments(value, defaultValue) {
+  if (value === undefined) return defaultValue;
+  if (!Number.isInteger(value) || value < 2 || value > MAX_DRAG_SEGMENTS) {
+    throw new Error(`dragPath steps must be an integer between 2 and ${MAX_DRAG_SEGMENTS}`);
+  }
+  return value;
+}
+
+function normalizeDragDuration(value) {
+  if (value === undefined) return DEFAULT_DRAG_DURATION_MS;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < MIN_DRAG_DURATION_MS || value > MAX_DRAG_DURATION_MS) {
+    throw new Error(`dragPath durationMs must be between ${MIN_DRAG_DURATION_MS} and ${MAX_DRAG_DURATION_MS}`);
+  }
+  return value;
+}
+
+function normalizeMouseButton(value) {
+  const normalized = value === undefined ? "left" : String(value).toLowerCase();
+  if (!["left", "right", "middle"].includes(normalized)) {
+    throw new Error("dragPath mouseButton must be left, right, or middle");
+  }
+  return normalized;
+}
+
+function normalizeDelivery(value) {
+  const normalized = value === undefined ? "app_post" : String(value).toLowerCase();
+  if (!["app_post", "global"].includes(normalized)) {
+    throw new Error("dragPath delivery must be app_post or global");
+  }
+  return normalized;
+}
+
+function normalizeDelayMs(value) {
+  if (value === undefined) return 0;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > MAX_DELAY_MS) {
+    throw new Error(`delayMs must be between 0 and ${MAX_DELAY_MS}`);
+  }
+  return value;
+}
+
+function normalizeTextOptions(options) {
+  if (options === undefined) return { submit: false };
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    throw new Error("text options must be an object");
+  }
+  return {
+    submit: options.submit === true,
+    focus: options.focus,
+    delayMs: options.delayMs,
+  };
+}
+
+function normalizeKeySpec(value) {
+  if (typeof value !== "string") throw new Error("key must be a string");
+  const normalized = value.split("+").map((part) => part.trim()).filter((part) => part !== "").join("+");
+  if (normalized === "") throw new Error("key must not be empty");
+  return normalized;
+}
+
+function normalizeHotkey(keys) {
+  const parts = [];
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      for (const child of value) visit(child);
+      return;
+    }
+    if (typeof value !== "string" || value.trim() === "") {
+      throw new Error("hotkey keys must be non-empty strings");
+    }
+    parts.push(value.trim());
+  };
+  for (const value of keys) visit(value);
+  if (parts.length === 0) throw new Error("hotkey requires at least one key");
+  return parts.join("+");
+}
+
+function sleep(durationMs) {
+  return new Promise((resolve) => setTimeout(resolve, durationMs));
 }
 
 function parseListApps(text) {
