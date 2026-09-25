@@ -16,30 +16,33 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 300_000;
 const NATIVE_REQUEST_TIMEOUT_MS = 120_000;
 const DEFAULT_NATIVE_DRAG_SEGMENTS = 256;
-const DEFAULT_FALLBACK_DRAG_SEGMENTS = 24;
-const MAX_DRAG_SEGMENTS = 256;
-const MAX_FALLBACK_DRAG_SEGMENTS = 64;
+const MAX_DRAG_SEGMENTS = 4096;
+const REQUIRED_NATIVE_TOOLS = ["drag_path"];
 const DEFAULT_DRAG_DURATION_MS = 800;
 const MIN_DRAG_DURATION_MS = 50;
 const MAX_DRAG_DURATION_MS = 10_000;
 const MAX_DELAY_MS = 1_000;
 const MAX_KEY_SEQUENCE_STEPS = 256;
-const CUA_GUIDANCE = `Computer Use JavaScript API:
+const CUA_GUIDANCE = `Computer Use JavaScript API. The value of the last expression is returned as the tool result unless the snippet already produced output.
 - await cua.listApps({ emit?: false })
-- const app = await cua.getApp("App Name")
-- await app.getAXState({ textLimit?, maxTreeNodes?, maxTreeDepth? })
+- await cua.windows()
+- const app = await cua.getApp("App Name")   // binding only; call app.getAXState() when state is needed
+- await app.getAXState({ textLimit?, maxTreeNodes?, maxTreeDepth?, windowId?, activate? })
 - await app.getScreenshot()
-- await app.click(elementIndex | [x, y], { mouseButton?, clickCount?, clickMethod? })
+- await app.screenshot({ windowId?, format?, quality?, maxWidth?, maxHeight?, activate? })
+- await app.click(elementIndex | [x, y], { mouseButton?, clickCount?, clickMethod?, windowId?, readBack? })
 - await app.typeText(text)
 - await app.pressKey(key)
 - await app.setValue(elementIndex, value)
 - await app.scroll(elementIndex, direction, pages?)
-- await app.drag([fromX, fromY], [toX, toY])
-- await app.dragPath({ points: [[x, y], ...], durationMs?, mouseButton?, delivery? })
-- await app.dragPath({ from, to, curve, steps?, durationMs?, mouseButton?, delivery? })
+- await app.drag([fromX, fromY], [toX, toY], { windowId?, readBack? })
+- await app.dragPath({ points: [[x, y], ...], durationMs?, mouseButton?, delivery?, windowId?, readBack? })
+- await app.dragPath({ from, to, curve, steps?, durationMs?, mouseButton?, delivery?, windowId?, readBack? })
 - await app.hotkey("cmd", "shift", "p")
 - await app.keySequence([{ key: "cmd+a" }, { text: "hello" }, { key: "Return" }], { delayMs? })
-- await app.performSecondaryAction(elementIndex, action)`;
+- await app.performSecondaryAction(elementIndex, action)
+Actions resolve to JSON results such as {"ok":true,"action":"click","target":"element:3","native":"ok"}.
+Coordinates are pixels inside the returned window screenshot; convert with screen_point = window_origin + pixel / scale using the mcpx.window metadata.`
 
 async function runServer(binaryPath) {
   if (typeof binaryPath !== "string" || binaryPath.trim() === "") {
@@ -380,6 +383,13 @@ function errorResult(error) {
   return { content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
 }
 
+function requireNativeTool(native, name) {
+  if (native.hasTool(name)) return;
+  throw new Error(
+    `${name} is not available in the configured open-computer-use binary; MCPX requires the MCPX build of open-computer-use (set MCPX_COMPUTER_USE_BINARY to that binary)`,
+  );
+}
+
 function runKernel() {
   const toolNames = new Set(Array.isArray(workerData?.tools) ? workerData.tools : []);
   const native = {
@@ -453,6 +463,11 @@ class PersistentJavaScriptSession {
     Object.freeze(nodeRepl);
     Object.defineProperty(this.repl.context, "nodeRepl", { value: nodeRepl, configurable: false, writable: false });
     Object.defineProperty(this.repl.context, "cua", { value: createCuaAPI(this.native, () => this.#output()), configurable: false, writable: false });
+    Object.defineProperty(this.repl.context, "console", {
+      value: createCapturedConsole(() => this.activeOutput),
+      configurable: true,
+      writable: true,
+    });
   }
 
   #output() {
@@ -464,24 +479,33 @@ class PersistentJavaScriptSession {
     this.requestMeta = requestMeta;
     const content = [];
     const active = {
+      produced: false,
       write(value) {
         content.push({ type: "text", text: formatValue(value) });
+        active.produced = true;
+      },
+      writeGuidance(text) {
+        content.push({ type: "text", text });
       },
       async emitImage(value) {
         const image = normalizeImage(await value);
         content.push({ type: "image", mimeType: image.mimeType, data: image.data });
+        active.produced = true;
       },
       reject: null,
     };
     this.activeOutput = active;
     try {
-      await new Promise((resolve, reject) => {
+      const value = await new Promise((resolve, reject) => {
         active.reject = reject;
         this.repl.eval(code, this.repl.context, "mcpx-computer-use", (error, result) => {
           if (error) reject(error);
           else resolve(result);
         });
       });
+      if (!active.produced && value !== undefined) {
+        content.push({ type: "text", text: formatCompletion(value) });
+      }
       if (content.length === 0) content.push({ type: "text", text: "(no output)" });
       return { content, isError: false };
     } catch (error) {
@@ -497,13 +521,17 @@ function createCuaAPI(native, activeOutput) {
   let docsEmitted = false;
   async function emitDocs() {
     if (docsEmitted) return;
-    activeOutput().write(CUA_GUIDANCE);
+    activeOutput().writeGuidance(CUA_GUIDANCE);
     docsEmitted = true;
   }
   async function call(tool, args = {}) {
     const result = await native.request("tools/call", { name: tool, arguments: args });
     if (result?.isError) throw new Error(toolResultText(result) || `${tool} failed`);
     return result;
+  }
+  async function callAction(tool, args, describe = {}) {
+    const result = await call(tool, args);
+    return { ok: true, action: tool, ...describe, native: toolResultText(result).trim() };
   }
   async function emitText(text, options = {}) {
     if (options.emit === false || !text) return;
@@ -517,10 +545,9 @@ function createCuaAPI(native, activeOutput) {
   }
 
   function appBinding(app) {
-    async function pressKey(key) {
+    async function pressKey(key, options = {}) {
       const normalized = normalizeKeySpec(key);
-      await call("press_key", { app, key: normalized });
-      return { key: normalized };
+      return callAction("press_key", { app, key: normalized, ...windowArgs(options) }, { key: normalized, windowId: options.windowId });
     }
 
     async function typeText(text, options) {
@@ -537,15 +564,19 @@ function createCuaAPI(native, activeOutput) {
           throw new Error("typeText.focus must be an element index or [x, y]");
         }
       }
-      await call("type_text", { app, text });
+      const result = await callAction(
+        "type_text",
+        { app, text, ...windowArgs(options) },
+        { characters: [...text].length, submitted: Boolean(normalizedOptions.submit), windowId: options?.windowId },
+      );
       if (normalizedOptions.submit) await pressKey("Return");
-      return { characters: [...text].length, submitted: normalizedOptions.submit };
+      return result;
     }
 
     async function hotkey(...keys) {
       const normalized = normalizeHotkey(keys);
-      await pressKey(normalized);
-      return { key: normalized };
+      const result = await pressKey(normalized);
+      return { ...result, action: "hotkey", key: normalized };
     }
 
     async function keySequence(sequence, options) {
@@ -574,58 +605,39 @@ function createCuaAPI(native, activeOutput) {
         }
         if (delayMs > 0 && index < sequence.length - 1) await sleep(delayMs);
       }
-      return { steps: sequence.length };
+      return { ok: true, action: "key_sequence", steps: sequence.length };
     }
 
     async function dragPath(options) {
       if (!options || typeof options !== "object" || Array.isArray(options)) {
         throw new Error("dragPath options must be an object");
       }
-      const defaultSegments = native.hasTool("drag_path") ? DEFAULT_NATIVE_DRAG_SEGMENTS : DEFAULT_FALLBACK_DRAG_SEGMENTS;
-      const points = await resolveDragPathPoints(options, defaultSegments);
+      requireNativeTool(native, "drag_path");
+      const points = await resolveDragPathPoints(options, DEFAULT_NATIVE_DRAG_SEGMENTS);
       const durationMs = normalizeDragDuration(options.durationMs);
       const mouseButton = normalizeMouseButton(options.mouseButton);
       const delivery = normalizeDelivery(options.delivery);
-
-      if (native.hasTool("drag_path")) {
-        await call("drag_path", {
+      const result = await callAction(
+        "drag_path",
+        {
           app,
           points: points.map(([x, y]) => ({ x, y })),
           duration_ms: durationMs,
           mouse_button: mouseButton,
           delivery,
-        });
-        return {
+          ...windowArgs(options),
+        },
+        {
           mode: "drag_path",
           segments: points.length - 1,
           points,
           durationMs,
           mouseButton,
           delivery,
-        };
-      }
-
-      if (mouseButton !== "left") {
-        throw new Error("dragPath fallback only supports the left mouse button; native drag_path is required");
-      }
-      if (points.length - 1 > MAX_FALLBACK_DRAG_SEGMENTS) {
-        throw new Error(`dragPath with more than ${MAX_FALLBACK_DRAG_SEGMENTS} segments requires native drag_path`);
-      }
-      const delayMs = normalizeDelayMs(options.delayMs);
-      for (let index = 1; index < points.length; index++) {
-        const from = points[index - 1];
-        const to = points[index];
-        await call("drag", { app, from_x: from[0], from_y: from[1], to_x: to[0], to_y: to[1] });
-        if (delayMs > 0 && index < points.length - 1) await sleep(delayMs);
-      }
-      return {
-        mode: "multi_drag",
-        segments: points.length - 1,
-        points,
-        durationMs: null,
-        mouseButton,
-        delivery: "app_post",
-      };
+          windowId: options.windowId,
+        },
+      );
+      return result;
     }
 
     return Object.freeze({
@@ -633,6 +645,7 @@ function createCuaAPI(native, activeOutput) {
         const result = await call("get_app_state", { app, ...snapshotArgs(options) });
         const text = toolResultText(result);
         await emitText(text, options);
+        await emitImages(toolResultImages(result), options);
         return text;
       },
       async getScreenshot(options = {}) {
@@ -642,37 +655,67 @@ function createCuaAPI(native, activeOutput) {
         await emitImages([image], options);
         return Buffer.from(image.data, "base64");
       },
-      async getAXStateAndScreenshot(options = {}) {
-        const result = await call("get_app_state", { app, ...snapshotArgs(options) });
-        const state = toolResultText(result);
-        const images = toolResultImages(result);
-        await emitText(state, options);
-        await emitImages(images, options);
-        return images[0] ? { state, screenshot: Buffer.from(images[0].data, "base64") } : { state };
-      },
       async click(target, options = {}) {
-        const targetArgs = Array.isArray(target) ? { x: target[0], y: target[1] } : { element_index: target };
-        await call("click", { app, ...targetArgs, ...clickArgs(options) });
+        let targetArgs;
+        let label;
+        if (Array.isArray(target)) {
+          const point = parseDrawPoint(target, "click.point");
+          targetArgs = { x: point[0], y: point[1] };
+          label = `point:${point[0]},${point[1]}`;
+        } else {
+          targetArgs = { element_index: target };
+          label = `element:${target}`;
+        }
+        return callAction("click", { app, ...targetArgs, ...clickArgs(options), ...windowArgs(options) }, { target: label, windowId: options.windowId });
       },
-      async drag(from, to) {
+      async drag(from, to, options = {}) {
         const start = parseDrawPoint(from, "drag.from");
         const end = parseDrawPoint(to, "drag.to");
-        await call("drag", { app, from_x: start[0], from_y: start[1], to_x: end[0], to_y: end[1] });
+        return callAction(
+          "drag",
+          { app, from_x: start[0], from_y: start[1], to_x: end[0], to_y: end[1], ...windowArgs(options) },
+          { from: start, to: end, windowId: options.windowId },
+        );
+      },
+      async screenshot(options = {}) {
+        requireNativeTool(native, "screenshot");
+        const result = await call("screenshot", { app, ...screenshotArgs(options) });
+        const meta = toolResultText(result);
+        const image = toolResultImages(result)[0];
+        if (!image) throw new Error(`screenshot unavailable for ${app}`);
+        await emitText(meta, options);
+        await emitImages([image], options);
+        return {
+          ok: true,
+          action: "screenshot",
+          meta,
+          mimeType: image.mimeType ?? "image/png",
+          bytes: Buffer.from(image.data ?? "", "base64").length,
+          windowId: options.windowId,
+        };
       },
       dragPath,
       hotkey,
       keySequence,
       pressKey,
       typeText,
-      async scroll(target, direction, pages = 1) {
+      async scroll(target, direction, pages = 1, options = {}) {
         if (Array.isArray(target)) throw new Error("coordinate scroll is not supported");
-        await call("scroll", { app, element_index: target, direction, pages });
+        return callAction(
+          "scroll",
+          { app, element_index: target, direction, pages, ...windowArgs(options) },
+          { elementIndex: target, direction, pages, windowId: options.windowId },
+        );
       },
-      async setValue(elementIndex, value) {
-        await call("set_value", { app, element_index: elementIndex, value });
+      async setValue(elementIndex, value, options = {}) {
+        return callAction("set_value", { app, element_index: elementIndex, value, ...windowArgs(options) }, { elementIndex, windowId: options.windowId });
       },
-      async performSecondaryAction(elementIndex, action) {
-        await call("perform_secondary_action", { app, element_index: elementIndex, action });
+      async performSecondaryAction(elementIndex, action, options = {}) {
+        return callAction(
+          "perform_secondary_action",
+          { app, element_index: elementIndex, action, ...windowArgs(options) },
+          { elementIndex, secondaryAction: action, windowId: options.windowId },
+        );
       },
     });
   }
@@ -692,6 +735,20 @@ function createCuaAPI(native, activeOutput) {
       if (options.emit !== false) activeOutput().write(apps);
       return { apps };
     },
+    async windows(options = {}) {
+      await emitDocs();
+      requireNativeTool(native, "list_windows");
+      const result = await call("list_windows", {});
+      const text = toolResultText(result);
+      let windows = text;
+      try {
+        windows = JSON.parse(text);
+      } catch {
+        windows = text;
+      }
+      await emitText(text, options);
+      return windows;
+    },
     async listApps(options = {}) {
       const state = await this.getState({ emit: false });
       if (options.emit !== false) activeOutput().write(state.apps);
@@ -699,9 +756,8 @@ function createCuaAPI(native, activeOutput) {
     },
     async getApp(app) {
       await emitDocs();
-      const result = await call("get_app_state", { app, text_limit: "max" });
-      await emitText(toolResultText(result));
-      return appBinding(app);
+      if (typeof app !== "string" || app.trim() === "") throw new Error("getApp app must be a non-empty string");
+      return appBinding(app.trim());
     },
   });
 }
@@ -929,6 +985,24 @@ function snapshotArgs(options = {}) {
   if (options.textLimit !== undefined) args.text_limit = options.textLimit;
   if (options.maxTreeNodes !== undefined) args.max_tree_nodes = options.maxTreeNodes;
   if (options.maxTreeDepth !== undefined) args.max_tree_depth = options.maxTreeDepth;
+  Object.assign(args, windowArgs(options));
+  return args;
+}
+
+function windowArgs(options = {}) {
+  const args = {};
+  if (options.windowId !== undefined && options.windowId !== null) args.window_id = options.windowId;
+  if (options.readBack !== undefined) args.read_back = Boolean(options.readBack);
+  if (options.activate !== undefined) args.activate = Boolean(options.activate);
+  return args;
+}
+
+function screenshotArgs(options = {}) {
+  const args = windowArgs(options);
+  if (options.format !== undefined) args.format = options.format;
+  if (options.quality !== undefined) args.quality = options.quality;
+  if (options.maxWidth !== undefined) args.max_width = options.maxWidth;
+  if (options.maxHeight !== undefined) args.max_height = options.maxHeight;
   return args;
 }
 
@@ -954,6 +1028,35 @@ function toolResultImages(result) {
 function formatValue(value) {
   if (typeof value === "string") return value;
   return util.inspect(value, { depth: 6, colors: false, breakLength: 100 });
+}
+
+function formatCompletion(value) {
+  if (typeof value === "string") return value;
+  if (value === null || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (ArrayBuffer.isView(value)) return `<${value.constructor.name} ${value.byteLength} bytes>`;
+  try {
+    const encoded = JSON.stringify(value);
+    if (encoded !== undefined) return encoded;
+  } catch {
+    // fall through to util.inspect for cyclic or non-serializable values
+  }
+  return util.inspect(value, { depth: 6, colors: false, breakLength: 100 });
+}
+
+function createCapturedConsole(output) {
+  const write = (prefix) => (...args) => {
+    const target = output();
+    if (!target) return;
+    const text = args.map((value) => formatValue(value)).join(" ");
+    target.write(`${prefix}${text}`);
+  };
+  return Object.freeze({
+    log: write(""),
+    info: write(""),
+    debug: write(""),
+    warn: write("[warn] "),
+    error: write("[error] "),
+  });
 }
 
 function normalizeImage(value) {

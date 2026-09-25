@@ -89,19 +89,31 @@ Plan、Artifact 等有状态操作都以服务端返回的完整 `remote_session
 
 ### Computer Use 前置依赖
 
-`computer` 复用独立的 [Open Computer Use](https://github.com/iFurySt/open-codex-computer-use) 原生运行时，不在 MCPX 内实现 Accessibility 或 UI Automation。使用前只需安装：
+`computer` 复用独立的 [Open Computer Use](https://github.com/iFurySt/open-codex-computer-use) 原生运行时，不在 MCPX 内实现 Accessibility 或 UI Automation。MCPX 需要**含 MCPX 补丁的构建**：上游 npm `open-computer-use@0.3.5` 缺少 `drag_path`、`list_windows`、`screenshot` 与窗口坐标元数据，调用这些能力时会返回明确错误而不是静默降级。
 
 ```bash
-npm i -g open-computer-use
+# 从 MCPX fork 构建原生 runtime（要求 Node.js 18+、Xcode CLI）
+cd ~/Workspace/code/ai/open-computer-use
+./scripts/build-open-computer-use-app.sh debug
+# 产物：dist/Open Computer Use (Dev).app/Contents/MacOS/OpenComputerUse
 ```
 
-该 npm 包包含 macOS、Windows 原生 runtime，要求 Node.js 18+，最低版本为 `open-computer-use@0.3.5`。macOS 首次使用需执行一次权限检查并授予 Accessibility 与 Screen Recording；Windows 必须在已登录桌面会话中运行。
+把构建产物指给 MCPX，然后启动服务：
 
 ```bash
-open-computer-use doctor
+export MCPX_COMPUTER_USE_BINARY="$HOME/Workspace/code/ai/open-computer-use/dist/Open Computer Use (Dev).app/Contents/MacOS/OpenComputerUse"
+mcpx
 ```
 
-MCPX 会自动启动并持有 `open-computer-use mcp` 进程，无需额外安装 JS adapter。也可通过 `MCPX_COMPUTER_USE_BINARY` 和 `MCPX_COMPUTER_USE_NODE` 显式指定可执行文件。
+macOS 首次使用需给该构建授予 Accessibility 与 Screen Recording——它由本机证书签名，无法继承 npm 预编译包（上游 Developer ID）已有的授权。授权流程：先运行一次
+
+```bash
+"$MCPX_COMPUTER_USE_BINARY" doctor
+```
+
+按提示在“系统设置 → 隐私与安全性”中给 Open Computer Use (Dev) 打开两项权限，doctor 显示 `accessibility=granted, screenRecording=granted` 后即可使用。Windows 需在已登录桌面会话中运行；fork 的 Windows runtime 与 macOS 使用同一套契约（`list_windows`、`screenshot`、`window_id`、`read_back`、`activate`、`mcpx.window` 元数据、越界坐标拒绝），但坐标单位是系统物理像素，`drag_path` 只支持 `app_post`（不支持 `delivery: global`）。
+
+MCPX 会自动启动并持有 `open-computer-use mcp` 进程，无需额外安装 JS adapter；也可通过 `MCPX_COMPUTER_USE_NODE` 显式指定 Node 可执行文件。
 
 ## 设计边界
 

@@ -93,7 +93,7 @@ func TestServicePreservesImageContent(t *testing.T) {
 	result, err := service.Execute(ctx, Request{
 		RemoteSessionID: "session-1",
 		Action:          "js",
-		Code:            `const app = await cua.getApp("Fake App"); await app.getScreenshot();`,
+		Code:            `const app = await cua.getApp("Fake App"); await app.getAXState();`,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -133,34 +133,33 @@ func TestServiceParsesHumanReadableListApps(t *testing.T) {
 	}
 }
 
-func TestServiceDragPathFallsBackToMultipleDrags(t *testing.T) {
+func TestServiceDragPathRequiresNativeDragPath(t *testing.T) {
 	service, ctx := newFakeService(t)
-	logPath := t.TempDir() + "/drag.jsonl"
-	t.Setenv("MCPX_FAKE_DRAG_LOG", logPath)
+	dragLog := t.TempDir() + "/drag.jsonl"
+	t.Setenv("MCPX_FAKE_DRAG_LOG", dragLog)
 
 	result, err := service.Execute(ctx, Request{
 		RemoteSessionID: "session-1",
 		Action:          "js",
-		Code:            `const app = await cua.getApp("Fake App"); const drawn = await app.dragPath({ points: [[10, 20], [30, 40], [50, 30]], durationMs: 600 }); nodeRepl.write(JSON.stringify(drawn));`,
+		Code:            `const app = await cua.getApp("Fake App"); await app.dragPath({ points: [[10, 20], [30, 40], [50, 30]], durationMs: 600 });`,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result == nil || result.IsError || !strings.Contains(resultText(result), `"mode":"multi_drag"`) || !strings.Contains(resultText(result), `"segments":2`) {
-		t.Fatalf("dragPath fallback result = %+v text=%q", result, resultText(result))
+	text := resultText(result)
+	if result == nil || !result.IsError || !strings.Contains(text, "drag_path") || !strings.Contains(text, "MCPX") {
+		t.Fatalf("missing native drag_path result = %+v text=%q", result, text)
 	}
-	drags := readDragLog(t, logPath)
-	if len(drags) != 2 {
-		t.Fatalf("drag calls = %d, want 2: %+v", len(drags), drags)
+	if _, err := os.Stat(dragLog); !os.IsNotExist(err) {
+		t.Fatalf("dragPath must not fall back to drag calls: %v", err)
 	}
-	assertDrag(t, drags[0], 10, 20, 30, 40)
-	assertDrag(t, drags[1], 30, 40, 50, 30)
 }
 
 func TestServiceDragPathSamplesCurveFunction(t *testing.T) {
 	service, ctx := newFakeService(t)
-	logPath := t.TempDir() + "/drag.jsonl"
-	t.Setenv("MCPX_FAKE_DRAG_LOG", logPath)
+	dragPathLog := t.TempDir() + "/drag-path.jsonl"
+	t.Setenv("MCPX_FAKE_DRAG_PATH", "1")
+	t.Setenv("MCPX_FAKE_DRAG_PATH_LOG", dragPathLog)
 
 	result, err := service.Execute(ctx, Request{
 		RemoteSessionID: "session-1",
@@ -173,12 +172,20 @@ func TestServiceDragPathSamplesCurveFunction(t *testing.T) {
 	if result == nil || result.IsError || !strings.Contains(resultText(result), `"segments":4`) {
 		t.Fatalf("dragPath curve result = %+v text=%q", result, resultText(result))
 	}
-	drags := readDragLog(t, logPath)
-	if len(drags) != 4 {
-		t.Fatalf("drag calls = %d, want 4: %+v", len(drags), drags)
+	entries := readToolLog(t, dragPathLog)
+	if len(entries) != 1 {
+		t.Fatalf("drag_path calls = %d, want 1: %+v", len(entries), entries)
 	}
-	assertDragNear(t, drags[0], 0, 0, 10, math.Sin(math.Pi/4)*10)
-	assertDragNear(t, drags[3], 30, math.Sin(math.Pi/4)*10, 40, 0)
+	arguments, _ := entries[0]["arguments"].(map[string]any)
+	points, _ := arguments["points"].([]any)
+	if len(points) != 5 {
+		t.Fatalf("drag_path points = %d, want 5: %+v", len(points), points)
+	}
+	first, _ := points[0].(map[string]any)
+	last, _ := points[4].(map[string]any)
+	if first["x"] != float64(0) || first["y"] != float64(0) || last["x"] != float64(40) || last["y"] != float64(0) {
+		t.Fatalf("drag_path endpoints = %+v .. %+v", first, last)
+	}
 }
 
 func TestServiceDragPathUsesNativeDragPathWhenAvailable(t *testing.T) {
@@ -242,23 +249,9 @@ func TestServiceDragPathDefaultsTo256WithNativeDragPath(t *testing.T) {
 	}
 }
 
-func TestServiceDragPathRejectsManySegmentsWithoutNativeSupport(t *testing.T) {
-	service, ctx := newFakeService(t)
-	result, err := service.Execute(ctx, Request{
-		RemoteSessionID: "session-1",
-		Action:          "js",
-		Code:            `const app = await cua.getApp("Fake App"); await app.dragPath({ from: [0, 0], to: [10, 0], steps: 256, curve: (t, from, to) => [from[0] + (to[0] - from[0]) * t, 0] });`,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result == nil || !result.IsError || !strings.Contains(resultText(result), "requires native drag_path") {
-		t.Fatalf("many-segment fallback result = %+v text=%q", result, resultText(result))
-	}
-}
-
 func TestServiceDragPathRejectsInvalidCurvePoint(t *testing.T) {
 	service, ctx := newFakeService(t)
+	t.Setenv("MCPX_FAKE_DRAG_PATH", "1")
 	result, err := service.Execute(ctx, Request{
 		RemoteSessionID: "session-1",
 		Action:          "js",
@@ -269,6 +262,193 @@ func TestServiceDragPathRejectsInvalidCurvePoint(t *testing.T) {
 	}
 	if result == nil || !result.IsError || !strings.Contains(resultText(result), "finite number") {
 		t.Fatalf("invalid curve result = %+v", result)
+	}
+}
+
+func TestServiceReturnsCompletionValue(t *testing.T) {
+	service, ctx := newFakeService(t)
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `JSON.stringify({a: 1})`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(result)
+	if result == nil || result.IsError || strings.TrimSpace(text) != `{"a":1}` {
+		t.Fatalf("completion value result = %+v text=%q", result, text)
+	}
+}
+
+func TestServiceActionsReturnStructuredResults(t *testing.T) {
+	service, ctx := newFakeService(t)
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `const app = await cua.getApp("Fake App"); await app.click(3);`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(result)
+	for _, fragment := range []string{`"ok":true`, `"action":"click"`, `"target":"element:3"`, `"native":"clicked"`} {
+		if !strings.Contains(text, fragment) {
+			t.Fatalf("click result missing %s: %q", fragment, text)
+		}
+	}
+}
+
+func TestServiceGetAppDoesNotEmitState(t *testing.T) {
+	service, ctx := newFakeService(t)
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `const app = await cua.getApp("Fake App"); nodeRepl.write("bound:" + typeof app.click);`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(result)
+	if result == nil || result.IsError || !strings.Contains(text, "bound:function") {
+		t.Fatalf("binding result = %+v text=%q", result, text)
+	}
+	if strings.Contains(text, "App=fake.app") {
+		t.Fatalf("getApp must not dump app state: %q", text)
+	}
+}
+
+func TestServiceConsoleLogIsCaptured(t *testing.T) {
+	service, ctx := newFakeService(t)
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `console.log("probe-42")`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.IsError || !strings.Contains(resultText(result), "probe-42") {
+		t.Fatalf("console result = %+v text=%q", result, resultText(result))
+	}
+}
+
+func TestServiceWindowsListsNativeWindows(t *testing.T) {
+	service, ctx := newFakeService(t)
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `await cua.windows();`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.IsError || !strings.Contains(resultText(result), `"window_id":77`) {
+		t.Fatalf("windows result = %+v text=%q", result, resultText(result))
+	}
+}
+
+func TestServiceActionsPassWindowIDAndReadBack(t *testing.T) {
+	service, ctx := newFakeService(t)
+	dragPathLog := t.TempDir() + "/drag-path.jsonl"
+	t.Setenv("MCPX_FAKE_DRAG_PATH", "1")
+	t.Setenv("MCPX_FAKE_DRAG_PATH_LOG", dragPathLog)
+
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `const app = await cua.getApp("Fake App"); await app.dragPath({ points: [[0, 0], [10, 0]], windowId: 77, readBack: true, activate: true });`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("dragPath result = %+v text=%q", result, resultText(result))
+	}
+	entries := readToolLog(t, dragPathLog)
+	if len(entries) != 1 {
+		t.Fatalf("drag_path calls = %d, want 1: %+v", len(entries), entries)
+	}
+	arguments, _ := entries[0]["arguments"].(map[string]any)
+	if arguments["window_id"] != float64(77) {
+		t.Fatalf("window_id = %v, want 77: %+v", arguments["window_id"], arguments)
+	}
+	if arguments["read_back"] != true {
+		t.Fatalf("read_back = %v, want true: %+v", arguments["read_back"], arguments)
+	}
+	if arguments["activate"] != true {
+		t.Fatalf("activate = %v, want true: %+v", arguments["activate"], arguments)
+	}
+}
+
+func TestServiceScreenshotReturnsMetadataAndImage(t *testing.T) {
+	service, ctx := newFakeService(t)
+	logPath := t.TempDir() + "/screenshot.jsonl"
+	t.Setenv("MCPX_FAKE_SCREENSHOT_LOG", logPath)
+
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `const app = await cua.getApp("Fake App"); await app.screenshot({ windowId: 77, format: "jpeg", quality: 0.6, maxWidth: 320 });`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.IsError || !strings.Contains(resultText(result), `"input_space":"window_screenshot_px"`) {
+		t.Fatalf("screenshot result = %+v text=%q", result, resultText(result))
+	}
+	entries := readToolLog(t, logPath)
+	if len(entries) != 1 {
+		t.Fatalf("screenshot calls = %d, want 1: %+v", len(entries), entries)
+	}
+	arguments, _ := entries[0]["arguments"].(map[string]any)
+	if arguments["window_id"] != float64(77) || arguments["format"] != "jpeg" || arguments["quality"] != 0.6 || arguments["max_width"] != float64(320) {
+		t.Fatalf("screenshot arguments = %+v", arguments)
+	}
+	var foundImage bool
+	for _, item := range result.Content {
+		if image, ok := item.(*mcp.ImageContent); ok && image.MIMEType == "image/jpeg" && len(image.Data) == 4 {
+			foundImage = true
+		}
+	}
+	if !foundImage {
+		t.Fatalf("screenshot image content missing: %+v", result.Content)
+	}
+}
+
+func TestServiceWindowsRequiresNativeSupport(t *testing.T) {
+	service, ctx := newFakeService(t)
+	t.Setenv("MCPX_FAKE_NEW_NATIVE_TOOLS", "0")
+
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `await cua.windows();`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(result)
+	if result == nil || !result.IsError || !strings.Contains(text, "list_windows") || !strings.Contains(text, "MCPX_COMPUTER_USE_BINARY") {
+		t.Fatalf("missing list_windows result = %+v text=%q", result, text)
+	}
+}
+
+func TestServiceScreenshotRequiresNativeSupport(t *testing.T) {
+	service, ctx := newFakeService(t)
+	t.Setenv("MCPX_FAKE_NEW_NATIVE_TOOLS", "0")
+
+	result, err := service.Execute(ctx, Request{
+		RemoteSessionID: "session-1",
+		Action:          "js",
+		Code:            `const app = await cua.getApp("Fake App"); await app.screenshot();`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(result)
+	if result == nil || !result.IsError || !strings.Contains(text, "screenshot") || !strings.Contains(text, "MCPX_COMPUTER_USE_BINARY") {
+		t.Fatalf("missing screenshot tool result = %+v text=%q", result, text)
 	}
 }
 
@@ -329,6 +509,7 @@ nodeRepl.write("keyboard-ok");`,
 
 func TestServiceRejectsInvalidDragPathPoints(t *testing.T) {
 	service, ctx := newFakeService(t)
+	t.Setenv("MCPX_FAKE_DRAG_PATH", "1")
 	result, err := service.Execute(ctx, Request{
 		RemoteSessionID: "session-1",
 		Action:          "js",

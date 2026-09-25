@@ -34,6 +34,20 @@ func runFakeNativeMCP() int {
 	server.AddTool(&mcp.Tool{Name: "click", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "clicked"}}}, nil
 	})
+	if os.Getenv("MCPX_FAKE_NEW_NATIVE_TOOLS") != "0" {
+		server.AddTool(&mcp.Tool{Name: "list_windows", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: `[{"window_id":77,"app":"fake.app","title":"Fake Window"}]`}}}, nil
+		})
+		server.AddTool(&mcp.Tool{Name: "screenshot", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			if err := appendToolLog(os.Getenv("MCPX_FAKE_SCREENSHOT_LOG"), "screenshot", req.Params.Arguments); err != nil {
+				return nil, err
+			}
+			return &mcp.CallToolResult{Content: []mcp.Content{
+				&mcp.TextContent{Text: `mcpx.window = {"window_id":77,"scale":1.25,"input_space":"window_screenshot_px"}`},
+				&mcp.ImageContent{Data: []byte{0x89, 0x50, 0x4e, 0x47}, MIMEType: "image/jpeg"},
+			}}, nil
+		})
+	}
 	server.AddTool(&mcp.Tool{Name: "type_text", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if err := appendToolLog(os.Getenv("MCPX_FAKE_KEY_LOG"), "type_text", req.Params.Arguments); err != nil {
 			return nil, err

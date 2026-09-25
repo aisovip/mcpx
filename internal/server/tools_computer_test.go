@@ -147,8 +147,8 @@ func TestComputerToolResultPreservesMixedContent(t *testing.T) {
 		"purpose":           "verify mixed content passthrough",
 		"code":              `nodeRepl.write("first output"); nodeRepl.write("second output");`,
 	})
-	if len(result.Content) != 3 {
-		t.Fatalf("content items = %d, want 3: %+v", len(result.Content), result.Content)
+	if len(result.Content) != 4 {
+		t.Fatalf("content items = %d, want 4: %+v", len(result.Content), result.Content)
 	}
 	first, _ := result.Content[0].(*mcp.TextContent)
 	second, _ := result.Content[1].(*mcp.TextContent)
@@ -158,6 +158,79 @@ func TestComputerToolResultPreservesMixedContent(t *testing.T) {
 	image, _ := result.Content[2].(*mcp.ImageContent)
 	if image == nil || image.MIMEType != "image/png" || len(image.Data) != 4 {
 		t.Fatalf("image content was rewritten: %+v", result.Content)
+	}
+	artifactLine, _ := result.Content[3].(*mcp.TextContent)
+	if artifactLine == nil || !strings.Contains(artifactLine.Text, `"resource_uri":"mcpx://`) {
+		t.Fatalf("artifact reference missing: %+v", result.Content)
+	}
+}
+
+func TestComputerToolRegistersImageArtifacts(t *testing.T) {
+	runtime := newWorkspaceRuntime(t, "demo")
+	principal, err := runtime.principalFromContext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, _ := runtime.reg.Get("demo")
+	created, err := runtime.remote.Create(context.Background(), principal, remotesession.CreateInput{
+		WorkspaceName: "demo", WorkspacePath: registered.Path,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+	runtime.computerService = &fakeComputerRunner{result: &mcp.CallToolResult{Content: []mcp.Content{
+		&mcp.TextContent{Text: "App=fake.app"},
+		&mcp.ImageContent{Data: imageBytes, MIMEType: "image/png"},
+	}}}
+
+	result, err := runtime.toolComputer(context.Background(), mcpresult.Request(map[string]any{
+		"remote_session_id": created.Session.ID,
+		"action":            "js",
+		"purpose":           "verify computer artifact registration",
+		"code":              `nodeRepl.write("state")`,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("result = %+v", result)
+	}
+
+	artifacts, err := runtime.artifacts.List(context.Background(), created.Session.ID, "screenshot", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artifacts) != 1 {
+		t.Fatalf("registered artifacts = %+v, want 1 screenshot artifact", artifacts)
+	}
+	artifact := artifacts[0]
+	if artifact.Size != int64(len(imageBytes)) || artifact.MIMEType != "image/png" {
+		t.Fatalf("artifact = %+v", artifact)
+	}
+
+	var textParts []string
+	for _, item := range result.Content {
+		if text, ok := item.(*mcp.TextContent); ok {
+			textParts = append(textParts, text.Text)
+		}
+	}
+	text := strings.Join(textParts, "\n")
+	if !strings.Contains(text, `"artifact_id":"`+artifact.ID+`"`) {
+		t.Fatalf("artifact id missing from result text: %q", text)
+	}
+	if !strings.Contains(text, artifact.ResourceURI) {
+		t.Fatalf("artifact uri missing from result text: %q", text)
+	}
+
+	var foundImage bool
+	for _, item := range result.Content {
+		if image, ok := item.(*mcp.ImageContent); ok && len(image.Data) == len(imageBytes) {
+			foundImage = true
+		}
+	}
+	if !foundImage {
+		t.Fatalf("image content was dropped: %+v", result.Content)
 	}
 }
 
