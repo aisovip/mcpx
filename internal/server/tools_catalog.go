@@ -16,12 +16,6 @@ import (
 // registerTools is the sole public tool registration point.
 func (r *Runtime) registerTools(s *mcp.Server) {
 	r.registerCleanCoreTools(s)
-	r.captureToolIndex(s)
-}
-
-func (r *Runtime) captureToolIndex(s *mcp.Server) {
-	// Official go-sdk has no ListTools snapshot API; addTool fills toolIndex.
-	_ = s
 }
 
 func (r *Runtime) registeredTools() []mcp.Tool {
@@ -33,17 +27,6 @@ func (r *Runtime) registeredTools() []mcp.Tool {
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 	return tools
-}
-
-// listedToolMap is a test/helper snapshot of the registered tool catalog.
-func (r *Runtime) listedToolMap() map[string]mcp.Tool {
-	r.toolIndexMu.RLock()
-	defer r.toolIndexMu.RUnlock()
-	out := make(map[string]mcp.Tool, len(r.toolIndex))
-	for name, tool := range r.toolIndex {
-		out[name] = tool
-	}
-	return out
 }
 
 // currentToolSchemaRevision is derived from the actual MCP registration,

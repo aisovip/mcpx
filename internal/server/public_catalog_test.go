@@ -12,6 +12,16 @@ import (
 	"testing"
 )
 
+func (r *Runtime) listedToolMap() map[string]mcp.Tool {
+	r.toolIndexMu.RLock()
+	defer r.toolIndexMu.RUnlock()
+	out := make(map[string]mcp.Tool, len(r.toolIndex))
+	for name, tool := range r.toolIndex {
+		out[name] = tool
+	}
+	return out
+}
+
 func TestPublicCatalogSchemaTotalBytes(t *testing.T) {
 	runtime := &Runtime{}
 	protocol := mcp.NewServer(&mcp.Implementation{Name: "mcpx-test", Version: "0.1.0"}, nil)

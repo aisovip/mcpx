@@ -82,7 +82,7 @@ func (r *Runtime) toolCommandExecute(ctx context.Context, req *mcp.CallToolReque
 	if runtimeSpec != nil {
 		payloadDigest = runtimeSpec.ScriptSHA256
 	}
-	commandDigest := commandRequestDigestWithPayload(envReq.RequestID, remote.ID, remote.WorkspaceName, command, purpose, scope, payloadDigest)
+	commandDigest := commandRequestDigestWithPayload(remote.ID, remote.WorkspaceName, command, purpose, scope, payloadDigest)
 	effective := r.effectiveConfig(remote.WorkspacePath)
 	if !effective.Terminal.Enabled {
 		return r.terminalError(envReq, remote.ID, remote.WorkspaceName, "disabled", "terminal tools are disabled")
@@ -435,7 +435,7 @@ func commandIntent(req envelope.Request) (purpose, scope string, err error) {
 	return purpose, scope, nil
 }
 
-func commandFailureCode(exitCode int, _ string) string {
+func commandFailureCode(exitCode int) string {
 	// POSIX shells reserve 127 for command lookup failure. Do not inspect the
 	// shell's diagnostic text here: modern Bash localizes that message, so an
 	// English substring check makes protocol error taxonomy locale-dependent.
@@ -452,14 +452,7 @@ func commandFailureMessage(code string, exitCode int) string {
 	return fmt.Sprintf("command exited with code %d", exitCode)
 }
 
-func commandRequestDigest(requestID, remoteSessionID, workspace, command, purpose, scope string) string {
-	return commandRequestDigestWithPayload(requestID, remoteSessionID, workspace, command, purpose, scope, "")
-}
-
-func commandRequestDigestWithPayload(requestID, remoteSessionID, workspace, command, purpose, scope, payloadDigest string) string {
-	// Request IDs identify transport attempts. They must not change the
-	// semantic operation digest used to bind confirmation across retry.
-	_ = requestID
+func commandRequestDigestWithPayload(remoteSessionID, workspace, command, purpose, scope, payloadDigest string) string {
 	parts := []string{remoteSessionID, workspace, command, purpose, scope}
 	if payloadDigest != "" {
 		parts = append(parts, payloadDigest)
@@ -980,8 +973,7 @@ func annotateExecutionOutcome(data map[string]any) (code, message string) {
 	}
 	if exitCode, ok := data["exit_code"].(int); ok {
 		if exitCode != 0 {
-			stderr, _ := data["stderr"].(string)
-			code := commandFailureCode(exitCode, stderr)
+			code := commandFailureCode(exitCode)
 			data["outcome"] = "error"
 			data["error_code"] = code
 			return code, commandFailureMessage(code, exitCode)

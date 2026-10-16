@@ -113,24 +113,19 @@ func (s *RetentionService) RunOnce(ctx context.Context) (RetentionReport, error)
 	report.DeletedFileSnapshots += snapshotCounts.file
 	report.DeletedEnvironmentSnaps += snapshotCounts.environment
 
-	busy, err := s.checkpoint(ctx)
-	if err != nil {
+	if err := s.checkpoint(ctx); err != nil {
 		report.Errors = append(report.Errors, fmt.Sprintf("wal checkpoint: %v", err))
 	}
 	// Skip full VACUUM on the shared state DB: with MaxOpenConns(1) it exclusive-locks
 	// for tens of seconds on large files (~100MB+) and starves observation/tool writes
 	// (context deadline exceeded). PASSIVE checkpoint above is enough for WAL health.
 	// Operators can still vacuum offline if reclaiming disk is required.
-	_ = busy
 	return report, nil
 }
 
-func (s *RetentionService) checkpoint(ctx context.Context) (bool, error) {
+func (s *RetentionService) checkpoint(ctx context.Context) error {
 	var busy, logFrames, checkpointed int
-	if err := s.db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)").Scan(&busy, &logFrames, &checkpointed); err != nil {
-		return false, err
-	}
-	return busy != 0, nil
+	return s.db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)").Scan(&busy, &logFrames, &checkpointed)
 }
 
 // TotalDeleted returns the number of rows removed in this pass.

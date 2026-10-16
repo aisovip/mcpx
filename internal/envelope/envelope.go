@@ -419,9 +419,10 @@ func ParseRequest(raw json.RawMessage) (Request, error) {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return Request{}, err
 	}
-	if req.Payload == nil {
-		req.Payload = map[string]any{}
-	}
+	// CallID is internal correlation metadata, not a client tool argument. Rebuild
+	// the business payload from flat arguments instead of the legacy nested envelope.
+	req.CallID = ""
+	req.Payload = map[string]any{}
 	// purpose is the public semantic field. Intent remains an internal
 	// observation name so existing handlers do not need to duplicate the value.
 	if strings.TrimSpace(req.Purpose) != "" {
@@ -441,22 +442,11 @@ func ParseRequest(raw json.RawMessage) (Request, error) {
 			delete(req.Payload, key)
 		}
 	}
-	// goal was a legacy model-supplied context field. Keep accepting old wire
-	// payloads, but discard it before any business handler can consume it.
-	delete(req.Payload, "goal")
 	// MCP tool schemas expose flat arguments. Normalize them into Payload so
 	// handlers share one request representation; explicit Payload values win.
 	var flat map[string]any
 	if err := json.Unmarshal(raw, &flat); err != nil {
 		return Request{}, err
-	}
-	if req.RemoteSessionID == "" {
-		if sessionID, ok := flat["session_id"].(string); ok {
-			req.RemoteSessionID = strings.TrimSpace(sessionID)
-		}
-	}
-	if req.CallID == "" {
-		req.CallID = firstStringValue(flat, "call_id", "callId")
 	}
 	for key, value := range flat {
 		if key == "goal" || key == "purpose" || key == "intent" || key == "activity" || key == "reasoning_summary" || key == "progress_summary" || key == "call_id" || key == "callId" || key == "session_id" || key == "remote_session_id" || key == "workspace" || key == "payload" || isRuntimeField(key) {
@@ -470,15 +460,6 @@ func ParseRequest(raw json.RawMessage) (Request, error) {
 	req.OperationID = "op_" + strings.TrimPrefix(req.RequestID, "req_")
 	req.StartedAtMs = 0
 	return req, nil
-}
-
-func firstStringValue(values map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }
 
 func isRuntimeField(key string) bool {

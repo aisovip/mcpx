@@ -154,7 +154,7 @@ func TestEnsureRequestID(t *testing.T) {
 }
 
 func TestParseRequest(t *testing.T) {
-	raw := json.RawMessage(`{"request_id":"r1","trace_id":"tr1","started_at_ms":123,"workspace":"p","payload":{"command":"ls","span_id":"sp1"}}`)
+	raw := json.RawMessage(`{"request_id":"r1","trace_id":"tr1","started_at_ms":123,"workspace":"p","command":"ls","span_id":"sp1"}`)
 	req, err := ParseRequest(raw)
 	if err != nil {
 		t.Fatal(err)
@@ -176,12 +176,15 @@ func TestParseRequest(t *testing.T) {
 }
 
 func TestParseRequestMergesFlatArgumentsIntoPayload(t *testing.T) {
-	req, err := ParseRequest(json.RawMessage(`{"intent":"inspect workspace","progress_summary":"已完成定位，下一步读取文件","callId":"call-1","workspace":"demo","command":"pwd","payload":{"command":"echo legacy"},"execution_task_id":"t1"}`))
+	req, err := ParseRequest(json.RawMessage(`{"intent":"inspect workspace","progress_summary":"已完成定位，下一步读取文件","workspace":"demo","command":"pwd","payload":{"command":"echo legacy","legacy":true},"execution_task_id":"t1"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if req.Payload["command"] != "echo legacy" {
-		t.Fatalf("payload should win: %+v", req.Payload)
+	if req.Payload["command"] != "pwd" {
+		t.Fatalf("flat current arguments must win over the legacy nested payload: %+v", req.Payload)
+	}
+	if _, exists := req.Payload["legacy"]; exists {
+		t.Fatalf("legacy nested payload leaked into business arguments: %+v", req.Payload)
 	}
 	if req.ExecutionTaskID != "t1" || req.Payload["execution_task_id"] != "t1" {
 		t.Fatalf("execution task argument missing: request=%+v payload=%+v", req, req.Payload)
@@ -192,13 +195,25 @@ func TestParseRequestMergesFlatArgumentsIntoPayload(t *testing.T) {
 	if req.ProgressSummary != "已完成定位，下一步读取文件" {
 		t.Fatalf("progress summary missing: %q", req.ProgressSummary)
 	}
-	if req.CallID != "call-1" {
-		t.Fatalf("correlation missing: %+v", req)
-	}
 	if _, exists := req.Payload["intent"]; exists {
 		t.Fatalf("intent leaked into payload: %+v", req.Payload)
 	}
 	if _, exists := req.Payload["progress_summary"]; exists {
 		t.Fatalf("progress summary leaked into payload: %+v", req.Payload)
+	}
+}
+
+func TestParseRequestIgnoresLegacyArgumentAliases(t *testing.T) {
+	req, err := ParseRequest(json.RawMessage(`{"session_id":"old-session","call_id":"old-call","callId":"old-camel-call"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.RemoteSessionID != "" || req.CallID != "" {
+		t.Fatalf("legacy aliases must not populate current request identity fields: %+v", req)
+	}
+	for _, key := range []string{"session_id", "call_id", "callId"} {
+		if _, exists := req.Payload[key]; exists {
+			t.Fatalf("legacy field %q leaked into the business payload: %+v", key, req.Payload)
+		}
 	}
 }

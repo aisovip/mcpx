@@ -92,7 +92,7 @@ func (r *Runtime) cleanExecuteReadyForIdempotency(ctx context.Context, req *mcp.
 	if !boolPayload(envReq.Payload, "user_confirmed") {
 		return false
 	}
-	digest := commandRequestDigestWithPayload(envReq.RequestID, remote.ID, remote.WorkspaceName, command, purpose, scope, payloadDigest)
+	digest := commandRequestDigestWithPayload(remote.ID, remote.WorkspaceName, command, purpose, scope, payloadDigest)
 	if _, ok := r.pendingCommandConfirmation(remote.ID, principal.ID, command, scope, digest); ok {
 		return true
 	}
