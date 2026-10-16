@@ -117,12 +117,6 @@ func readActionLabel(input map[string]any) string {
 			scopes = []string{"."}
 		}
 		return view + " " + strconv.Quote(query) + " in " + strings.Join(scopes, ", ")
-	case "environment":
-		sections := stringValues(input["sections"], 6)
-		if len(sections) == 0 {
-			return "environment"
-		}
-		return "environment (" + strings.Join(sections, ", ") + ")"
 	}
 	if path := stringValue(input["path"]); path != "" {
 		return path

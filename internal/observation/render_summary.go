@@ -178,8 +178,6 @@ func remoteDataSummary(tool string, data map[string]any) string {
 		return fmt.Sprintf("Session %s opened for workspace %s.", id, name)
 	case "plan_manage", "plan_create", "plan_read", "plan_transition":
 		return planManageOutputSummary(data)
-	case "environment_inspect", "environment_read", "environment_snapshot_create":
-		return environmentInspectOutputSummary(data)
 	case "runtime_inspect", "runtime_read":
 		return runtimeInspectOutputSummary(data)
 	case "workspace_state", "workspace_observe":
@@ -291,64 +289,6 @@ func planTaskIDs(tasks []any, limit int) []string {
 		}
 	}
 	return ids
-}
-
-func environmentInspectOutputSummary(data map[string]any) string {
-	parts := make([]string, 0, 2)
-	if snapshotID, _ := data["snapshot_id"].(string); strings.TrimSpace(snapshotID) != "" {
-		parts = append(parts, "环境快照 "+strings.TrimSpace(snapshotID)+" 已保存")
-	}
-	if toolchains := environmentToolchains(data["toolchains"]); len(toolchains) > 0 {
-		parts = append(parts, "工具链："+strings.Join(toolchains, "，"))
-	}
-	if len(parts) == 0 {
-		return "环境检查已完成。"
-	}
-	return strings.Join(parts, "；") + "。"
-}
-
-func environmentToolchains(value any) []string {
-	toolchains, _ := value.(map[string]any)
-	if len(toolchains) == 0 {
-		return nil
-	}
-	preferred := []string{"python", "go", "git", "node", "java"}
-	keys := make([]string, 0, len(toolchains))
-	seen := make(map[string]bool, len(toolchains))
-	for _, key := range preferred {
-		if _, exists := toolchains[key]; exists {
-			keys = append(keys, key)
-			seen[key] = true
-		}
-	}
-	extra := make([]string, 0, len(toolchains)-len(keys))
-	for key := range toolchains {
-		if !seen[key] {
-			extra = append(extra, key)
-		}
-	}
-	sort.Strings(extra)
-	keys = append(keys, extra...)
-
-	result := make([]string, 0, 3)
-	for _, key := range keys {
-		if len(result) >= 3 {
-			break
-		}
-		info, _ := toolchains[key].(map[string]any)
-		available, _ := info["available"].(bool)
-		if !available {
-			continue
-		}
-		version, _ := info["version"].(string)
-		version = compactLine(version)
-		if version == "" {
-			result = append(result, key)
-			continue
-		}
-		result = append(result, key+" "+version)
-	}
-	return result
 }
 
 func runtimeInspectOutputSummary(data map[string]any) string {

@@ -141,23 +141,6 @@ func normalizePublicAction(tool string, arguments map[string]any) (string, map[s
 	case "runtime_inspect":
 		tool = "runtime_read"
 		setView(action)
-	case "environment_inspect":
-		if value, ok := result["save_snapshot"].(bool); ok && value {
-			tool = "environment"
-			delete(result, "action")
-			delete(result, "save_snapshot")
-		} else {
-			tool = "environment_read"
-			if _, ok := result["compare_to"]; ok {
-				result["snapshot_id"] = result["compare_to"]
-				delete(result, "compare_to")
-			}
-			if action == "" {
-				setView("current")
-			} else {
-				setView(action)
-			}
-		}
 	case "workspace_state":
 		tool = "observe"
 		setView(action)
@@ -183,8 +166,8 @@ func normalizePublicAction(tool string, arguments map[string]any) (string, map[s
 
 func isCleanPublicTool(tool string) bool {
 	switch tool {
-	case "session", "read", "edit", "move_out", "observe", "progress", "execute", "plan", "artifact", "skill_tool", "mcp_tool", "browser", "computer",
-		"operation_batch", "operation_manage", "runtime_read", "environment_read", "environment", "screenshot_capture", "secret_provide":
+	case "session", "read", "edit", "move_out", "observe", "progress", "execute", "plan", "artifact", "skill_tool", "mcp_tool",
+		"runtime_read", "screenshot_capture", "secret_provide":
 		return true
 	default:
 		return false

@@ -372,20 +372,6 @@ func TestWrapToolResultRendersCommandAsShellBlock(t *testing.T) {
 	}
 }
 
-func TestWrapToolResultShowsOperationConfirmationToken(t *testing.T) {
-	raw := mcpresult.NewText(`{"status":"waiting_confirmation","data":{"operation_id":"op_wait","steps":[{"id":"main","tool":"command_run","state":"waiting_confirmation","confirmation_token":"ct_op_token"}],"confirmation_required":true},"error":{"code":"USER_CONFIRMATION_REQUIRED","message":"操作等待语义确认"}}`)
-	wrapped := WrapToolResult("operation_manage", ResultContext{
-		RequestID: "req_op_wait", TraceID: "tr_op_wait", SpanID: "sp_op_wait",
-		Timing: Timing{ServerElapsedMs: 4},
-	}, raw)
-	text := wrapped.Content[0].(*mcp.TextContent).Text
-	for _, want := range []string{"op_wait", "confirmation_token: `ct_op_token`", "action=resume"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("operation confirmation display missing %q: %s", want, text)
-		}
-	}
-}
-
 func TestWrapToolResultPreservesNonTextContent(t *testing.T) {
 	resource := mcpresult.NewResourceLink("mcpx://test/resource", "resource", "test resource", "text/plain")
 	raw := mcpresult.NewText("plain")

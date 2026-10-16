@@ -326,7 +326,6 @@ func TestRenderTextShowsReadViewTargets(t *testing.T) {
 		{name: "list directory", input: `{"view":"list","path":"flux-boot-ui/src/store","include_glob":"**/*.ts"}`, want: "• Read flux-boot-ui/src/store (list)"},
 		{name: "search scope", input: `{"view":"search","query":"loading","paths":["flux-boot-ui/src"]}`, want: `• Read search "loading" in flux-boot-ui/src`},
 		{name: "context scope", input: `{"view":"context","query":"consultComm refresh history","paths":["flux-boot-ui/src/store"]}`, want: `• Read context "consultComm refresh history" in flux-boot-ui/src/store`},
-		{name: "environment sections", input: `{"view":"environment","sections":["toolchains","runtime"]}`, want: "• Read environment (toolchains, runtime)"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -414,26 +413,6 @@ func TestRenderTextSummarizesPlanManageEnvelope(t *testing.T) {
 	}
 	if strings.Contains(text, "data=object") {
 		t.Fatalf("plan summary leaked generic data marker: %s", text)
-	}
-}
-
-func TestRenderTextSummarizesEnvironmentInspectEnvelope(t *testing.T) {
-	var output bytes.Buffer
-	if err := RenderText(&output, Event{
-		Tool:   "environment_inspect",
-		Type:   TypeToolCompleted,
-		Output: []byte(`{"status":"ok","result":{"content":[{"type":"text","text":"{\"ok\":true,\"status\":\"ok\",\"data\":{\"snapshot_id\":\"env_demo\",\"toolchains\":{\"python\":{\"available\":true,\"version\":\"Python 3.11.9\"},\"go\":{\"available\":true,\"version\":\"go1.26.1\"},\"node\":{\"available\":false}}}}"}]}}`),
-	}, false); err != nil {
-		t.Fatal(err)
-	}
-	text := output.String()
-	for _, want := range []string{"环境快照 env_demo 已保存", "python Python 3.11.9", "go go1.26.1"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("environment summary missing %q: %s", want, text)
-		}
-	}
-	if strings.Contains(text, "data=object") {
-		t.Fatalf("environment summary leaked generic data marker: %s", text)
 	}
 }
 

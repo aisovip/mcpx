@@ -56,11 +56,6 @@ func (r *Runtime) toolSession(ctx context.Context, req *mcp.CallToolRequest) (*m
 	}
 }
 
-// toolEnvironment is the single write-side environment operation: save a snapshot.
-func (r *Runtime) toolEnvironment(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return r.toolEnvironmentSnapshotCreate(ctx, req)
-}
-
 func (r *Runtime) toolWorkspaceHistoryRead(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	envReq, principal, fail := r.remoteRequest(ctx, req)
 	if fail != nil {
@@ -228,32 +223,6 @@ func canonicalRuntimeReadRequest(req *mcp.CallToolRequest) (*mcp.CallToolRequest
 		return publicDispatch(req, "view", "instructions"), "instructions"
 	}
 	return publicDispatch(req, "view", "capabilities"), "capabilities"
-}
-
-func (r *Runtime) toolEnvironmentRead(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	req, view := canonicalEnvironmentReadRequest(req)
-	updates := map[string]any{"save_snapshot": false}
-	if view == "compare" {
-		if snapshotID, ok := mcpresult.Arguments(req)["snapshot_id"]; ok {
-			updates["compare_to"] = snapshotID
-		}
-	}
-	return r.toolEnvironmentInspect(ctx, forwardedRequest(req, updates))
-}
-
-func canonicalEnvironmentReadRequest(req *mcp.CallToolRequest) (*mcp.CallToolRequest, string) {
-	if view := publicSelector(req, "view"); view != "" {
-		return req, view
-	}
-	view := "current"
-	if strings.TrimSpace(stringPayload(mcpresult.Arguments(req), "snapshot_id")) != "" {
-		view = "compare"
-	}
-	return publicDispatch(req, "view", view), view
-}
-
-func (r *Runtime) toolEnvironmentSnapshotCreate(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return r.toolEnvironmentInspect(ctx, forwardedRequest(req, map[string]any{"save_snapshot": true}))
 }
 
 func (r *Runtime) toolObserveChanges(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

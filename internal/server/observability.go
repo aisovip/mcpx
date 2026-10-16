@@ -57,7 +57,7 @@ func (r *Runtime) addTool(s *mcp.Server, tool mcp.Tool, handler mcp.ToolHandler)
 }
 
 func outputSchemaForTool(toolName string) json.RawMessage {
-	if toolName == "mcp_tool" || toolName == "computer" {
+	if toolName == "mcp_tool" {
 		return nil
 	}
 	limits, hasLimits := publishedLimits()[toolName]
@@ -146,7 +146,6 @@ func (r *Runtime) instrumentTool(name string, handler mcp.ToolHandler) mcp.ToolH
 		if isCleanPublicTool(name) {
 			callCtx = withCleanCoreRequest(callCtx)
 		}
-		internalOperationStep := isOperationChild(callCtx)
 		observationRequest, observationParseErr := r.parseEnv(callCtx, req)
 		if observationParseErr == nil && name != "session" && strings.TrimSpace(observationRequest.RemoteSessionID) == "" {
 			if principal, principalErr := r.principalFromContext(callCtx); principalErr == nil {
@@ -159,11 +158,11 @@ func (r *Runtime) instrumentTool(name string, handler mcp.ToolHandler) mcp.ToolH
 		arguments := mcpresult.Arguments(req)
 		observedArguments := observationArguments(name, arguments)
 		var embeddedActivityErr error
-		if !internalOperationStep && observationParseErr == nil {
+		if observationParseErr == nil {
 			embeddedActivityErr = r.recordEmbeddedAgentActivity(callCtx, observationRequest, runtime, received.UTC())
 		}
-		if !internalOperationStep && observationParseErr == nil && embeddedActivityErr == nil && r.observation != nil {
-			// Activity is recorded synchronously before this async lifecycle event,
+		if observationParseErr == nil && embeddedActivityErr == nil && r.observation != nil {
+			// Activity is recorded synchronously before the tool-start event,
 			// preserving semantic -> tool ordering in the observer stream. Ephemeral
 			// scripts are hashed/redacted before reaching the durable store.
 			_ = r.observation.RecordToolStarted(callCtx, name, observationRequest, observedArguments)
@@ -172,10 +171,6 @@ func (r *Runtime) instrumentTool(name string, handler mcp.ToolHandler) mcp.ToolH
 		if embeddedActivityErr != nil {
 			result = mcpresult.NewError("INVALID_ACTIVITY: " + embeddedActivityErr.Error())
 			err = nil
-		} else if !isOperationChild(callCtx) && r.operations != nil && asyncEligibleTool(name) && executionMode(req) == "async" && !isEphemeralRuntimeArguments(arguments) && observationParseErr == nil {
-			result, err = callToolSafely(name, func() (*mcp.CallToolResult, error) {
-				return r.submitAsyncTool(callCtx, name, req, observationRequest)
-			})
 		} else {
 			result, err = callToolSafely(name, func() (*mcp.CallToolResult, error) {
 				return handler(callCtx, req)
@@ -222,12 +217,10 @@ func (r *Runtime) instrumentTool(name string, handler mcp.ToolHandler) mcp.ToolH
 				},
 			}, result)
 		}
-		if !internalOperationStep && observationParseErr == nil && r.observation != nil {
+		if observationParseErr == nil && r.observation != nil {
 			_ = r.observation.RecordToolCompleted(callCtx, name, observationRequest, observedArguments, result, err, timing)
 		}
-		if !internalOperationStep {
-			logToolCall(name, runtime, status, timing)
-		}
+		logToolCall(name, runtime, status, timing)
 		return result, err
 	}
 }
@@ -262,8 +255,6 @@ func transparentMCPToolResult(name string, req *mcp.CallToolRequest, result *mcp
 	switch name {
 	case "mcp_tool":
 		return toolAction(req) == "call"
-	case "computer":
-		return true
 	default:
 		return false
 	}

@@ -74,19 +74,6 @@ func TestStreamableHTTPReconnectRestoresRemoteSession(t *testing.T) {
 	if beforeData["rev"] == nil || beforeData["sha256"] != nil {
 		t.Fatal("缺少 compact rev 或泄漏完整 SHA")
 	}
-	batchArgs := map[string]any{
-		"remote_session_id": remoteID, "purpose": "核对恢复前后同一读取操作",
-		"run_id": "reconnect-run", "operation_id": "reconnect-operation",
-		"operations": []any{map[string]any{"id": "read-proof", "tool": "read", "arguments": readArgs}},
-	}
-	call(first, "operation_batch", batchArgs)
-	waitArgs := map[string]any{"remote_session_id": remoteID, "operation_id": "reconnect-operation", "action": "wait", "timeout_ms": 5000}
-	waited := call(first, "operation_manage", waitArgs)
-	waitData, _ := waited["data"].(map[string]any)
-	terminalID, _ := waitData["terminal_event_id"].(string)
-	if waitData["state"] != "succeeded" || waitData["run_id"] != "reconnect-run" || terminalID == "" {
-		t.Fatalf("实际 HTTP 等待没有返回稳定终态: %+v", waitData)
-	}
 	offline.Store(true)
 	failedCtx, failedCancel := context.WithTimeout(ctx, 2*time.Second)
 	_, err := first.CallTool(failedCtx, &mcp.CallToolParams{Name: "read", Arguments: readArgs})
@@ -126,17 +113,6 @@ func TestStreamableHTTPReconnectRestoresRemoteSession(t *testing.T) {
 	afterData, _ := after["data"].(map[string]any)
 	if afterData["rev"] != beforeData["rev"] || afterData["content"] != beforeData["content"] {
 		t.Fatal("重连后文件身份或内容改变")
-	}
-	// 使用同一稳定提交身份恢复，不因 HTTP/Runtime 重启生成新操作。
-	batchReplay := call(second, "operation_batch", batchArgs)
-	batchData, _ := batchReplay["data"].(map[string]any)
-	if batchData["terminal_event_id"] != terminalID || batchData["state_sequence"] != waitData["state_sequence"] {
-		t.Fatal("跨重启提交回读改变了终态身份")
-	}
-	again := call(second, "operation_manage", waitArgs)
-	againData, _ := again["data"].(map[string]any)
-	if againData["terminal_event_id"] != terminalID || againData["operation_id"] != "reconnect-operation" {
-		t.Fatal("跨重启等待没有复用原终态")
 	}
 	principal, err := restored.principalFromContext(ctx)
 	if err != nil {

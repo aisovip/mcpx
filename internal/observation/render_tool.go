@@ -422,11 +422,11 @@ func actionVerb(tool, action string) string {
 			return "Created"
 		}
 		return "Read"
-	case "workspace_observe", "workspace_history_read", "session_read", "source_read", "task_read", "plan_read", "runtime_read", "environment_read", "artifact_read", "extension_discover":
+	case "workspace_observe", "workspace_history_read", "session_read", "source_read", "task_read", "plan_read", "runtime_read", "artifact_read", "extension_discover":
 		return "Read"
 	case "task_control":
 		return "Controlled"
-	case "plan_create", "environment_snapshot_create":
+	case "plan_create":
 		return "Created"
 	case "plan_transition":
 		return "Updated"

@@ -114,9 +114,8 @@ func TestPublicCatalogIsExactlyTheCleanCoreContract(t *testing.T) {
 
 	want := []string{
 		"workspace", "session", "read", "edit", "move_out", "observe", "progress",
-		"operation_batch", "operation_manage",
-		"execute", "plan", "artifact", "skill_tool", "mcp_tool", "browser", "computer",
-		"runtime_read", "environment_read", "environment", "screenshot_capture", "secret_provide",
+		"execute", "plan", "artifact", "skill_tool", "mcp_tool",
+		"runtime_read", "screenshot_capture", "secret_provide",
 	}
 	got := make([]string, 0, len(runtime.listedToolMap()))
 	for name := range runtime.listedToolMap() {
@@ -127,14 +126,14 @@ func TestPublicCatalogIsExactlyTheCleanCoreContract(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("public tool catalog = %v, want %v", got, want)
 	}
-	for _, legacy := range []string{"change", "change_read", "change_prepare", "change_execute", "change_manage", "move_out_prepare", "submit_move_out", "command_run", "command_execute", "task_read", "task", "plan_read", "extension_discover", "artifact_read", "discover", "skill_call", "mcp_call"} {
+	for _, legacy := range []string{"change", "change_read", "change_prepare", "change_execute", "change_manage", "move_out_prepare", "submit_move_out", "command_run", "command_execute", "task_read", "task", "plan_read", "extension_discover", "artifact_read", "discover", "skill_call", "mcp_call", "browser", "computer", "operation_batch", "operation_manage", "environment", "environment_read"} {
 		if runtime.toolHandlers[legacy] != nil {
 			t.Fatalf("legacy handler %q must not be dispatchable", legacy)
 		}
 	}
 
 	for name, registered := range runtime.listedToolMap() {
-		if name == "mcp_tool" || name == "computer" {
+		if name == "mcp_tool" {
 			if registered.OutputSchema != nil {
 				t.Fatalf("%s must omit OutputSchema: %+v", name, registered.OutputSchema)
 			}
@@ -167,6 +166,9 @@ func TestPublicCatalogIsExactlyTheCleanCoreContract(t *testing.T) {
 			t.Fatalf("%s must reject unknown arguments: %s", name, mcpresult.ToolSchemaJSON(registered))
 		}
 		properties, _ := schema["properties"].(map[string]any)
+		if properties["execution_mode"] != nil {
+			t.Fatalf("%s must not expose generic Operation execution_mode: %s", name, mcpresult.ToolSchemaJSON(registered))
+		}
 		if properties["task_id"] != nil {
 			t.Fatalf("%s must not expose ambiguous task_id: %s", name, mcpresult.ToolSchemaJSON(registered))
 		}
@@ -400,40 +402,6 @@ func TestPublicCatalogIsExactlyTheCleanCoreContract(t *testing.T) {
 		if toolName == "execute" && properties["execution_task_id"] == nil {
 			t.Fatalf("execute must expose execution_task_id: %s", mcpresult.ToolSchemaJSON(runtime.listedToolMap()[toolName]))
 		}
-	}
-	operationManage := runtime.listedToolMap()["operation_manage"]
-	var operationSchema map[string]any
-	if err := json.Unmarshal(mcpresult.ToolSchemaJSON(operationManage), &operationSchema); err != nil {
-		t.Fatal(err)
-	}
-	operationProperties, _ := operationSchema["properties"].(map[string]any)
-	operationIDs, _ := operationProperties["operation_ids"].(map[string]any)
-	if operationIDs["type"] != "array" {
-		t.Fatalf("operation_manage operation_ids schema=%+v", operationIDs)
-	}
-	for _, raw := range operationSchema["required"].([]any) {
-		if raw == "operation_id" {
-			t.Fatalf("operation_manage must make operation_id conditional: %s", mcpresult.ToolSchemaJSON(operationManage))
-		}
-	}
-	if _, hasOneOf := operationSchema["oneOf"]; hasOneOf {
-		t.Fatalf("operation_manage must not rely on top-level oneOf: %s", mcpresult.ToolSchemaJSON(operationManage))
-	}
-	for _, key := range []string{"action", "operation_id", "operation_ids", "step_id", "timeout_ms", "confirmation_token", "cursor", "limit"} {
-		if operationProperties[key] == nil {
-			t.Fatalf("operation_manage missing property %q", key)
-		}
-	}
-	actionProp, _ := operationProperties["action"].(map[string]any)
-	actionDesc, _ := actionProp["description"].(string)
-	for _, needle := range []string{"operation_id", "operation_ids", "status", "result"} {
-		if !strings.Contains(actionDesc, needle) {
-			t.Fatalf("operation_manage action.description missing %q: %s", needle, actionDesc)
-		}
-	}
-	opRequired, _ := operationSchema["required"].([]any)
-	if !reflect.DeepEqual(opRequired, []any{"action"}) {
-		t.Fatalf("operation_manage required must be exactly [action], got %v", opRequired)
 	}
 }
 

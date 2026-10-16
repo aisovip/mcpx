@@ -32,7 +32,7 @@ func TestAgentGuidanceIsCompactPrincipledContract(t *testing.T) {
 	default:
 		t.Fatalf("tool routing type=%T", routingIface)
 	}
-	if !containsAnyString(routing["inspect_source"], "read") || !containsAnyString(routing["inspect_environment"], "environment_read") || !containsAnyString(routing["modify_files"], "edit") {
+	if !containsAnyString(routing["inspect_source"], "read") || !containsAnyString(routing["modify_files"], "edit") || routing["inspect_environment"] != nil {
 		t.Fatalf("canonical routing=%+v", routing)
 	}
 	rules, ok := guidance["rules"].([]string)

@@ -459,7 +459,7 @@ func ParseRequest(raw json.RawMessage) (Request, error) {
 		req.CallID = firstStringValue(flat, "call_id", "callId")
 	}
 	for key, value := range flat {
-		if key == "goal" || key == "purpose" || key == "intent" || key == "activity" || key == "reasoning_summary" || key == "progress_summary" || key == "call_id" || key == "callId" || key == "session_id" || key == "remote_session_id" || key == "workspace" || key == "payload" || key == "execution_mode" || isRuntimeField(key) {
+		if key == "goal" || key == "purpose" || key == "intent" || key == "activity" || key == "reasoning_summary" || key == "progress_summary" || key == "call_id" || key == "callId" || key == "session_id" || key == "remote_session_id" || key == "workspace" || key == "payload" || isRuntimeField(key) {
 			continue
 		}
 		if _, exists := req.Payload[key]; !exists {
@@ -483,7 +483,7 @@ func firstStringValue(values map[string]any, keys ...string) string {
 
 func isRuntimeField(key string) bool {
 	switch key {
-	case "request_id", "trace_id", "span_id", "started_at_ms", "received_at_ms", "completed_at_ms", "network_latency_ms", "processing_ms", "server_elapsed_ms", "client_info", "execution_mode":
+	case "request_id", "trace_id", "span_id", "started_at_ms", "received_at_ms", "completed_at_ms", "network_latency_ms", "processing_ms", "server_elapsed_ms", "client_info":
 		return true
 	default:
 		return false

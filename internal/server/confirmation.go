@@ -2,7 +2,7 @@ package server
 
 import "mcpx/internal/approval"
 
-// pendingConfirmationItems builds the session bootstrap view for all operations
+// pendingConfirmationItems builds the session bootstrap view for pending confirmations
 // that still need an explicit user confirmation.
 func pendingConfirmationItems(pending []approval.Pending) []map[string]any {
 	items := make([]map[string]any, 0, len(pending))

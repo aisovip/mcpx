@@ -21,8 +21,6 @@ func TestCommonSuggestedActionsFitPublicSchemas(t *testing.T) {
 		{name: "context continuation", action: nextAction("context_query", map[string]any{"remote_session_id": "rs_1", "action": "query", "query": "needle", "mode": "smart", "cursor": "next"})},
 		{name: "task continuation", action: nextAction("execute", map[string]any{"remote_session_id": "rs_1", "action": "attach", "execution_task_id": "task_1", "stdout_offset": 10, "stderr_offset": 20})},
 		{name: "task logs", action: nextAction("observe", map[string]any{"remote_session_id": "rs_1", "view": "logs", "execution_task_id": "task_1", "stdout_offset": 10, "stderr_offset": 20})},
-		{name: "environment snapshot", action: nextAction("environment_inspect", map[string]any{"remote_session_id": "rs_1", "save_snapshot": true})},
-		{name: "environment compare", action: nextAction("environment_inspect", map[string]any{"workspace": "demo", "action": "compare", "compare_to": "env_1"})},
 		{name: "legacy task status", action: nextAction("task_manage", map[string]any{"remote_session_id": "rs_1", "action": "status", "execution_task_id": "task_1"})},
 		{name: "artifact continuation", action: nextAction("artifact", map[string]any{"remote_session_id": "rs_1", "action": "read", "artifact_id": "art_1", "offset": 1024, "limit": 1024})},
 	}
@@ -36,10 +34,6 @@ func TestCommonSuggestedActionsFitPublicSchemas(t *testing.T) {
 	contextArgs := contextAction["arguments"].(map[string]any)
 	if contextAction["tool"] != "read" || contextArgs["view"] != "context" || contextArgs["search_mode"] != "smart" || contextArgs["mode"] != nil {
 		t.Fatalf("context continuation was not normalized to read semantics: %+v", contextAction)
-	}
-	snapshotArgs := cases[6].action["arguments"].(map[string]any)
-	if cases[6].action["tool"] != "environment" || snapshotArgs["action"] != nil || snapshotArgs["save_snapshot"] != nil {
-		t.Fatalf("environment snapshot continuation retains deleted protocol fields: %+v", cases[6].action)
 	}
 }
 

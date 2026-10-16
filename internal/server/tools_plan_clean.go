@@ -11,7 +11,7 @@ import (
 
 // toolPlanClean maps the stable plan contract onto the persistent plan
 // service. The service keeps its historical transition names internally so
-// existing operation tests and stored plan events remain compatible.
+// existing tests and stored plan events remain readable.
 func (r *Runtime) toolPlanClean(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ctx = withCleanCoreRequest(ctx)
 	action := toolAction(req)

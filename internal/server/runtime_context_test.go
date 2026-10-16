@@ -179,25 +179,20 @@ func TestTransportSessionBindingAllowsImplicitRemoteSession(t *testing.T) {
 		t.Fatalf("ordinary read leaked correlation operation_id: %+v", semantic)
 	}
 
-	asyncResult, err := wrapped(ctxA, mcpresult.Request(map[string]any{
-		"view": "list", "path": ".", "purpose": "verify bound async read", "execution_mode": "async", "limit": 5,
-	}))
-	if err != nil || asyncResult.IsError {
-		t.Fatalf("implicit bound async read failed: err=%v result=%+v", err, asyncResult)
+	listed, err := wrapped(ctxA, mcpresult.Request(map[string]any{"view": "list", "path": ".", "limit": 5}))
+	if err != nil || listed.IsError {
+		t.Fatalf("implicit bound list read failed: err=%v result=%+v", err, listed)
 	}
-	asyncStructured, _ := asyncResult.StructuredContent.(map[string]any)
-	asyncData, _ := asyncStructured["data"].(map[string]any)
-	operationID, _ := asyncData["operation_id"].(string)
-	asyncContext, _ := asyncStructured["context"].(map[string]any)
-	if asyncStructured["status"] != "accepted" || operationID == "" || asyncContext["operation_id"] != operationID {
-		t.Fatalf("persistent async operation identity missing: %+v", asyncStructured)
+	listedStructured, _ := listed.StructuredContent.(map[string]any)
+	if listedStructured["status"] != "succeeded" {
+		t.Fatalf("ordinary read should complete synchronously: %+v", listedStructured)
 	}
-	asyncEncoded, _ := json.Marshal(asyncStructured)
-	if strings.Contains(string(asyncEncoded), "remote_session_id") {
-		t.Fatalf("implicit async model payload repeated remote_session_id: %s", asyncEncoded)
+	listedEncoded, _ := json.Marshal(listedStructured)
+	if strings.Contains(string(listedEncoded), "remote_session_id") {
+		t.Fatalf("implicit bound model payload repeated remote_session_id: %s", listedEncoded)
 	}
-	if final, timeout, waitErr := rt.operations.Wait(context.Background(), operationID, 5*time.Second); waitErr != nil || timeout || final.State != "succeeded" {
-		t.Fatalf("implicit async operation did not complete: state=%s timeout=%v err=%v", final.State, timeout, waitErr)
+	if data, _ := listedStructured["data"].(map[string]any); data["operation_id"] != nil {
+		t.Fatalf("ordinary read exposed a generic Operation ID: %+v", data)
 	}
 
 	envReq, _, fail := rt.remoteRequest(ctxA, mcpresult.Request(map[string]any{"remote_session_id": idB}))

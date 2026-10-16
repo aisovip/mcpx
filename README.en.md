@@ -2,7 +2,7 @@
 
 **An MCP Runtime connecting AI to local development environments.**
 
-MCPX is an **MCP Runtime (gateway)** for development environments. ChatGPT, Claude, Cursor, Grok, and other MCP clients that support Streamable HTTP can use one consistent tool surface to inspect projects, review Unified Diffs, modify source code, run tasks, collect environment information, and call local MCP servers and Skills.
+MCPX is an **MCP Runtime (gateway)** for development environments. ChatGPT, Claude, Cursor, Grok, and other MCP clients that support Streamable HTTP can use one consistent tool surface to inspect projects, review Unified Diffs, modify source code, run tasks, capture screenshots, and call local MCP servers and Skills.
 
 Development state is stored in SQLite-backed Remote Sessions. It is independent of any AI vendor or a single `Mcp-Session-Id`, so different clients can query, authorize, hand off, and continue the same development session.
 
@@ -17,9 +17,8 @@ Development state is stored in SQLite-backed Remote Sessions. It is independent 
 | **Terminal** | Run short commands or persistent tasks, inspect logs and ports, attach, and stop tasks. |
 | **Source and Edit** | Read source with SHA-256 revisions, apply atomic create/update/rename edits, preserve file format, and inspect Unified Diffs. |
 | **Project Task** | Discover project-defined test, build, and check tasks and parse structured diagnostics. |
-| **Environment** | Inspect OS, architecture, kernel, display, container, shell, resources, filesystem, and toolchain. |
 | **Extensions** | Proxy upstream MCP servers and discover or execute local Skills. |
-| **Computer Use** | Control macOS and Windows desktop apps through a persistent JavaScript REPL backed by the independent Open Computer Use runtime. |
+| **Screenshot** | Capture a display or screen region and return it as MCP image content. |
 | **Security and Audit** | OAuth / Bearer authentication, principals, session ACLs, command and file policies, approvals, and JSONL audit logs. |
 
 ## Quick start
@@ -134,11 +133,9 @@ curl -sS -m 5 \
 
 ## Tool surface
 
-`tools/list` is the authoritative source for tool names, descriptions, input schemas, and annotations. The current public surface contains 21 tools: 12 core tools and 9 support tools.
+`tools/list` is the authoritative source for tool names, descriptions, input schemas, and annotations. The current public surface contains 15 tools: 12 core tools and 3 support tools.
 
-The core tools are `workspace`, `session`, `read`, `edit`, `move_out`, `observe`, `progress`, `execute`, `plan`, `artifact`, `skill_tool`, and `mcp_tool`. The support tools are `operation_batch`, `operation_manage`, `runtime_read`, `environment_read`, `environment`, `browser`, `computer`, `screenshot_capture`, and `secret_provide`.
-
-`computer` requires Node.js 18+ and the independent `open-computer-use` runtime (`0.3.5+`). Install it with `npm i -g open-computer-use`; on macOS run `open-computer-use doctor` once and grant Accessibility and Screen Recording. MCPX starts and owns the long-lived `open-computer-use mcp` child process. Windows requires an active logged-in desktop session.
+The core tools are `workspace`, `session`, `read`, `edit`, `move_out`, `observe`, `progress`, `execute`, `plan`, `artifact`, `skill_tool`, and `mcp_tool`. The support tools are `runtime_read`, `screenshot_capture`, and `secret_provide`.
 
 All stateful tools use the full `remote_session_id`. The normal source-edit workflow is:
 

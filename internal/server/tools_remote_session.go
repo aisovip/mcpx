@@ -173,9 +173,6 @@ func (r *Runtime) createRemoteSession(ctx context.Context, principal auth.Princi
 	if err != nil {
 		return remotesession.CreateResult{}, err
 	}
-	if err := r.ensureSessionEnvironment(ctx, principal, &result); err != nil {
-		r.logAudit(audit.Event{RequestID: envReq.RequestID, RemoteSessionID: result.Session.ID, Workspace: workspaceName, Tool: "environment_snapshot", Status: "error", Detail: map[string]any{"error": err.Error()}})
-	}
 	if result.Replayed {
 		return result, nil
 	}

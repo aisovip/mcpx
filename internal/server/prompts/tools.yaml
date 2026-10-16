@@ -2,22 +2,16 @@
 tools:
   workspace: 零参数列出已注册 Workspace；用于创建 session 前发现工作空间。
   session: 创建、恢复或关闭 Remote Session；省略 action 默认 open/resume，remote_session_id 存在时恢复原会话，mode 可直接推导 close。
-  read: 读取、搜索、列举或组装 Workspace 源码上下文；view 在语义唯一时可省略，items[] 支持批量文件读取。环境事实使用 environment_read。
+  read: 读取、搜索、列举或组装 Workspace 源码上下文；view 在语义唯一时可省略，items[] 支持批量文件读取。
   edit: 创建、更新或重命名 Workspace 文件；使用 revision guard 和幂等语义，不提供删除。删除/移出使用 move_out。
   move_out: 安全移出明确文件、目录或 symlink；prepare 冻结 manifest，用户确认后 submit 仅携带服务端 confirmation_uuid。
   observe: 查看会话、执行 Task、Plan Task、历史或日志；目标唯一时可省略 view，任务日志支持流式 offset 续读。
   progress: 发布用户可见进度与终态；过程仅用于有业务意义的里程碑、等待、阻塞或失败，任务正常完成并准备最终回复前必须用 completed + result 汇报一次最终结果。
   execute: 按策略执行命令或项目任务并处理 attach/stop/stdin；purpose 必须描述真实目标和副作用，长命令返回 execution_task_id。
   plan: 创建、读取、推进、阻塞、重规划或交付持久化计划。
-  operation_batch: 按 DAG 提交多个公开工具操作；无依赖步骤可并发。
-  operation_manage: 查询、等待、读取结果、取消或恢复异步 Operation。
   runtime_read: 读取 MCPX 运行时能力、项目摘要或适用指令。
-  environment_read: 读取当前主机/工具链环境或与已保存快照比较。
-  environment: 保存当前环境快照。
   skill_tool: 统一完成 Skill 的 list、describe 与 call；Runtime 内部负责 revision 一致性。
   mcp_tool: 统一完成 MCP Server/Tool 的 list、describe 与 call；Runtime 内部负责 schema revision 一致性。
-  browser: 通过本机 OpenAI 官方 ChatGPT/Codex 浏览器扩展复用现有 Chrome/Edge 与登录态；提供常用标签页/导航/DOM-CUA/输入/截图强类型动作，并以 official 高级入口覆盖当前 Browser Service 的 Playwright/AX/WebMCP/history/export/dialog 等 execute 命令；所有页面访问和敏感动作保留官方 Browser Service 安全检查及 user_confirmed 两阶段确认。
-  computer: 通过持久 JavaScript REPL 控制本机桌面应用；js 执行 top-level await 与 cua API（listApps/getApp、app.getAXState/getScreenshot/click/typeText/pressKey/setValue/scroll/drag/performSecondaryAction），reset 清空绑定。原生动作由外部 open-computer-use 提供，MCPX 不增加二次审批。
   artifact: 登记、列出或分片读取 MCPX 开发产物。
   screenshot_capture: 按明确 purpose 截取显示器或屏幕区域。
   secret_provide: 按明确 purpose 向当前会话提供仅驻留内存的 Secret。

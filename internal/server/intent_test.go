@@ -49,7 +49,7 @@ func TestPublicToolSchemasExcludeObservationBookkeeping(t *testing.T) {
 		}
 	}
 
-	for _, name := range []string{"workspace", "read", "observe", "runtime_read", "environment_read"} {
+	for _, name := range []string{"workspace", "read", "observe", "runtime_read"} {
 		schema := decodedToolSchema(t, runtime.listedToolMap()[name])
 		properties, _ := schema["properties"].(map[string]any)
 		if properties["purpose"] != nil {
@@ -70,7 +70,7 @@ func TestEffectfulToolsOwnPurposeContract(t *testing.T) {
 	runtime.registerTools(protocol)
 	registered := runtime.listedToolMap()
 
-	for _, name := range []string{"edit", "operation_batch", "screenshot_capture", "secret_provide"} {
+	for _, name := range []string{"edit", "screenshot_capture", "secret_provide"} {
 		schema := decodedToolSchema(t, registered[name])
 		properties, _ := schema["properties"].(map[string]any)
 		if properties["purpose"] == nil || !schemaRequires(schema, "purpose") {
@@ -86,14 +86,6 @@ func TestEffectfulToolsOwnPurposeContract(t *testing.T) {
 			t.Fatalf("%s action.description must document purpose for call: %s", name, actionDesc)
 		}
 	}
-	computer := decodedToolSchema(t, registered["computer"])
-	computerProps, _ := computer["properties"].(map[string]any)
-	computerAction, _ := computerProps["action"].(map[string]any)
-	computerDesc, _ := computerAction["description"].(string)
-	if !strings.Contains(computerDesc, "js") || !strings.Contains(computerDesc, "reset") || !strings.Contains(computerDesc, "purpose") {
-		t.Fatalf("computer action.description must document js/reset purpose: %s", computerDesc)
-	}
-
 	execute := decodedToolSchema(t, registered["execute"])
 	execProps, _ := execute["properties"].(map[string]any)
 	execAction, _ := execProps["action"].(map[string]any)
@@ -121,7 +113,6 @@ func TestPurposeDescriptionsAreLocalToEffect(t *testing.T) {
 		"edit":               "文件变更",
 		"screenshot_capture": "屏幕",
 		"secret_provide":     "Secret",
-		"computer":           "桌面",
 	}
 	for name, fragment := range checks {
 		schema := decodedToolSchema(t, registered[name])

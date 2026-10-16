@@ -15,7 +15,6 @@ import (
 	"mcpx/internal/envelope"
 	"mcpx/internal/logging"
 	"mcpx/internal/observation"
-	"mcpx/internal/operation"
 	"mcpx/internal/remotesession"
 	"mcpx/internal/terminal"
 )
@@ -272,7 +271,54 @@ func publicResultStatus(result *mcp.CallToolResult) string {
 			}
 		}
 	}
-	return operationResultStatus(result)
+	return resultStatusFromContent(result)
+}
+
+func resultStatusFromContent(result *mcp.CallToolResult) string {
+	if status := findStatusValue(result.StructuredContent); status != "" {
+		return status
+	}
+	for _, content := range result.Content {
+		textContent, ok := content.(*mcp.TextContent)
+		if !ok {
+			continue
+		}
+		var value any
+		if json.Unmarshal([]byte(textContent.Text), &value) == nil {
+			if status := findStatusValue(value); status != "" {
+				return status
+			}
+		}
+	}
+	return ""
+}
+
+func findStatusValue(value any) string {
+	mapValue, ok := value.(map[string]any)
+	if !ok {
+		if items, ok := value.([]any); ok {
+			for _, item := range items {
+				if status := findStatusValue(item); status != "" {
+					return status
+				}
+			}
+		}
+		return ""
+	}
+	if status, ok := mapValue["status"].(string); ok {
+		switch status {
+		case "succeeded", "accepted", "waiting_confirmation", "interrupted", "failed", "ok":
+			return status
+		}
+	}
+	for _, key := range []string{"mcpx", "result", "data", "error"} {
+		if nested, exists := mapValue[key]; exists {
+			if status := findStatusValue(nested); status != "" {
+				return status
+			}
+		}
+	}
+	return ""
 }
 
 func firstToolText(result *mcp.CallToolResult) string {
@@ -393,42 +439,6 @@ func (r *Runtime) observeRemoteEvent(session remotesession.Session, event remote
 		ResourceURI:     event.ResourceURI,
 		Truncated:       truncated,
 		CreatedAt:       event.CreatedAt,
-	})
-}
-
-func (r *Runtime) observeOperationEvent(event operation.Event) {
-	if r == nil || r.observation == nil {
-		return
-	}
-	typeName := event.Type
-	parentOperationID := ""
-	if event.StepID != "" {
-		parentOperationID = event.OperationID
-	}
-	status := string(event.State)
-	if event.State == operation.StateQueued || event.State == operation.StateRunning {
-		status = "running"
-	}
-	var lifecycle json.RawMessage
-	if event.StateEventID != "" {
-		lifecycle, _ = json.Marshal(map[string]any{"operation_id": event.OperationID,
-			"run_id":         event.RunID,
-			"state_event_id": event.StateEventID, "state_sequence": event.StateSequence, "state": event.State})
-	}
-	_ = r.observation.Record(context.Background(), observation.Event{
-		Workspace:         event.WorkspaceName,
-		RemoteSessionID:   event.RemoteSessionID,
-		RequestID:         event.RequestID,
-		CallID:            firstNonEmptyObservationID(event.RequestID),
-		OperationID:       event.OperationID,
-		ParentOperationID: parentOperationID,
-		StepID:            event.StepID,
-		Tool:              event.Tool,
-		Type:              typeName,
-		Status:            status,
-		Summary:           event.Summary,
-		Output:            lifecycle,
-		CreatedAt:         event.CreatedAt,
 	})
 }
 

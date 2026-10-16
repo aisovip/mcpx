@@ -60,21 +60,20 @@ func (s *Service) notifyEvent(session Session, event Event) {
 }
 
 type Session struct {
-	ID                    string     `json:"remote_session_id"`
-	WorkspaceName         string     `json:"workspace"`
-	WorkspacePath         string     `json:"-"`
-	Label                 string     `json:"label"`
-	Description           string     `json:"description"`
-	Status                string     `json:"status"`
-	OwnerPrincipalID      string     `json:"-"`
-	Role                  string     `json:"role,omitempty"`
-	BaseGitHead           string     `json:"base_git_head,omitempty"`
-	BaseTreeDigest        string     `json:"base_tree_digest,omitempty"`
-	EnvironmentSnapshotID string     `json:"environment_snapshot_id,omitempty"`
-	Version               int        `json:"version"`
-	CreatedAt             time.Time  `json:"created_at"`
-	LastActiveAt          time.Time  `json:"last_active_at"`
-	ClosedAt              *time.Time `json:"closed_at,omitempty"`
+	ID               string     `json:"remote_session_id"`
+	WorkspaceName    string     `json:"workspace"`
+	WorkspacePath    string     `json:"-"`
+	Label            string     `json:"label"`
+	Description      string     `json:"description"`
+	Status           string     `json:"status"`
+	OwnerPrincipalID string     `json:"-"`
+	Role             string     `json:"role,omitempty"`
+	BaseGitHead      string     `json:"base_git_head,omitempty"`
+	BaseTreeDigest   string     `json:"base_tree_digest,omitempty"`
+	Version          int        `json:"version"`
+	CreatedAt        time.Time  `json:"created_at"`
+	LastActiveAt     time.Time  `json:"last_active_at"`
+	ClosedAt         *time.Time `json:"closed_at,omitempty"`
 }
 
 type CreateInput struct {
@@ -90,10 +89,8 @@ type CreateInput struct {
 }
 
 type CreateResult struct {
-	Session                 Session `json:"session"`
-	Replayed                bool    `json:"replayed,omitempty"`
-	EnvironmentSnapshotID   string  `json:"environment_snapshot_id,omitempty"`
-	EnvironmentStaticDigest string  `json:"environment_static_digest,omitempty"`
+	Session  Session `json:"session"`
+	Replayed bool    `json:"replayed,omitempty"`
 }
 
 type ListInput struct {
@@ -220,8 +217,7 @@ func (s *Service) List(ctx context.Context, principal auth.Principal, in ListInp
 	}
 	query := `SELECT rs.id, rs.workspace_name, rs.workspace_path, rs.label, rs.description,
         rs.status, rs.owner_principal_id, m.role, COALESCE(rs.base_git_head,''),
-        COALESCE(rs.base_tree_digest,''), COALESCE(rs.environment_snapshot_id,''),
-        rs.version, rs.created_at, rs.last_active_at, rs.closed_at
+        COALESCE(rs.base_tree_digest,''), rs.version, rs.created_at, rs.last_active_at, rs.closed_at
         FROM remote_sessions rs JOIN remote_session_members m ON m.remote_session_id = rs.id
         WHERE m.principal_id = ?`
 	args := []any{principal.ID}
@@ -274,7 +270,7 @@ func (s *Service) List(ctx context.Context, principal auth.Principal, in ListInp
 func (s *Service) Get(ctx context.Context, principal auth.Principal, sessionID string) (Session, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT rs.id, rs.workspace_name, rs.workspace_path, rs.label,
         rs.description, rs.status, rs.owner_principal_id, m.role, COALESCE(rs.base_git_head,''),
-        COALESCE(rs.base_tree_digest,''), COALESCE(rs.environment_snapshot_id,''), rs.version,
+        COALESCE(rs.base_tree_digest,''), rs.version,
         rs.created_at, rs.last_active_at, rs.closed_at
         FROM remote_sessions rs JOIN remote_session_members m ON m.remote_session_id = rs.id
         WHERE rs.id = ? AND m.principal_id = ?`, sessionID, principal.ID)
@@ -440,15 +436,6 @@ func (s *Service) Touch(ctx context.Context, principal auth.Principal, sessionID
 		sessionID, principal.ID, clientName, clientVersion, millis, millis)
 }
 
-func (s *Service) SetEnvironmentSnapshot(ctx context.Context, principal auth.Principal, sessionID, snapshotID string) error {
-	if _, err := s.Get(ctx, principal, sessionID); err != nil {
-		return err
-	}
-	_, err := s.db.ExecContext(ctx, `UPDATE remote_sessions SET environment_snapshot_id = ?, version = version + 1,
-        last_active_at = ? WHERE id = ?`, snapshotID, s.now().UTC().UnixMilli(), sessionID)
-	return err
-}
-
 func upsertPrincipal(ctx context.Context, tx *sql.Tx, principal auth.Principal, now time.Time) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO principals(id, kind, subject_hash, created_at, last_seen_at)
         VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at`,
@@ -475,7 +462,7 @@ func scanSession(row scanner) (Session, error) {
 	var closedAt sql.NullInt64
 	err := row.Scan(&session.ID, &session.WorkspaceName, &session.WorkspacePath, &session.Label,
 		&session.Description, &session.Status, &session.OwnerPrincipalID, &session.Role,
-		&session.BaseGitHead, &session.BaseTreeDigest, &session.EnvironmentSnapshotID,
+		&session.BaseGitHead, &session.BaseTreeDigest,
 		&session.Version, &createdAt, &lastActiveAt, &closedAt)
 	if err != nil {
 		return Session{}, err

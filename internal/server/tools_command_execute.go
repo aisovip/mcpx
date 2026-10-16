@@ -391,7 +391,7 @@ func commandOutputText(ctx context.Context, data map[string]any, summary string)
 		if isCleanCoreRequest(ctx) {
 			builder.WriteString("Output truncated; call observe(view=logs) or execute(action=attach) to read more.")
 		} else {
-			builder.WriteString("Output truncated; call task(operation=attach) or task_read(view=logs) to read more.")
+			builder.WriteString("Output truncated; call execute(action=attach) or observe(view=logs) to read more.")
 		}
 	}
 	return builder.String()

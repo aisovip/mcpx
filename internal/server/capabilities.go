@@ -52,7 +52,7 @@ func clientProtocolRevision() string { return hashRevision(clientProtocolCapabil
 func capabilityGroups() map[string][]string {
 	return map[string][]string{
 		"core":    {"workspace", "session", "read", "edit", "move_out", "observe", "progress", "execute", "plan", "artifact", "skill_tool", "mcp_tool"},
-		"support": {"operation_batch", "operation_manage", "runtime_read", "environment_read", "environment", "browser", "computer", "screenshot_capture", "secret_provide"},
+		"support": {"runtime_read", "screenshot_capture", "secret_provide"},
 	}
 }
 
@@ -70,8 +70,6 @@ type toolCapabilityDefinition struct {
 var toolCapabilityDefinitions = []toolCapabilityDefinition{
 	{Name: "observe", Domain: "observation", RequiresRemoteSession: true},
 	{Name: "progress", Domain: "progress", RequiresRemoteSession: true},
-	{Name: "operation_batch", Domain: "operation", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}},
-	{Name: "operation_manage", Domain: "operation", RequiresRemoteSession: true},
 	{Name: "workspace", Domain: "workspace"},
 	{Name: "session", Domain: "session"},
 	{Name: "read", Domain: "source", RequiresRemoteSession: true},
@@ -85,10 +83,6 @@ var toolCapabilityDefinitions = []toolCapabilityDefinition{
 	// Support tools intentionally remain outside the core workflow but share
 	// the same remote_session_id contract; their definitions are listed above.
 	{Name: "runtime_read", Domain: "runtime"},
-	{Name: "environment_read", Domain: "environment"},
-	{Name: "environment", Domain: "environment", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}},
-	{Name: "browser", Domain: "browser", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}},
-	{Name: "computer", Domain: "computer", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}},
 	{Name: "screenshot_capture", Domain: "screenshot", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}},
 	{Name: "secret_provide", Domain: "secrets", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}},
 }

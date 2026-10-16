@@ -15,7 +15,6 @@ import (
 	"mcpx/internal/config"
 	"mcpx/internal/edit"
 	"mcpx/internal/file"
-	"mcpx/internal/operation"
 	"mcpx/internal/remotesession"
 	"mcpx/internal/source"
 )
@@ -66,8 +65,8 @@ func TestMachineCapabilitiesPublishHardLimits(t *testing.T) {
 	if read["max_source_bytes"] != file.MaxSourceBytes || read["max_items"] != MaxReadItems || read["max_direct_entries"] != source.MaxDirectListEntries {
 		t.Fatalf("read limits=%+v", read)
 	}
-	if limits["operation_batch"].(map[string]any)["max_steps"] != operation.MaxSteps {
-		t.Fatalf("operation limits=%+v", limits["operation_batch"])
+	if _, exists := limits["operation_batch"]; exists {
+		t.Fatalf("removed Operation tools must not publish limits: %+v", limits["operation_batch"])
 	}
 	if limits["edit"].(map[string]any)["max_changed_lines"] != edit.MaxChangedLines {
 		t.Fatalf("edit limits=%+v", limits["edit"])
@@ -119,6 +118,23 @@ func TestCapabilityListIncludesInstructionsSkillsAndRoleState(t *testing.T) {
 	ctx := authContextForCapabilities()
 	created := callEnvelope(t, runtime.toolSessionOpen, ctx, map[string]any{"workspace": "project"})
 	createdData := created["data"].(map[string]any)
+	for _, field := range []string{"environment_snapshot_id", "environment_static_digest"} {
+		if createdData[field] != nil {
+			t.Fatalf("session creation must not return Environment field %q: %+v", field, createdData)
+		}
+	}
+	if sessionData, ok := createdData["session"].(map[string]any); ok {
+		if sessionData["environment_snapshot_id"] != nil {
+			t.Fatalf("session payload must not return an Environment snapshot: %+v", sessionData)
+		}
+	}
+	var environmentSnapshots int
+	if err := runtime.state.DB().QueryRowContext(context.Background(), "SELECT COUNT(*) FROM environment_snapshots").Scan(&environmentSnapshots); err != nil {
+		t.Fatalf("count Environment snapshots: %v", err)
+	}
+	if environmentSnapshots != 0 {
+		t.Fatalf("session creation must not store Environment snapshots, got %d", environmentSnapshots)
+	}
 	openedInventory := createdData["extension_inventory"].(map[string]any)
 	openedSkills := openedInventory["skills"].([]any)
 	if len(openedSkills) != 1 || openedSkills[0].(map[string]any)["name"] != "review" {

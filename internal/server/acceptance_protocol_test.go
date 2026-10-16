@@ -219,9 +219,8 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 	}
 	expectedTools := []string{
 		"workspace", "session", "read", "edit", "move_out", "observe", "progress",
-		"operation_batch", "operation_manage",
-		"execute", "plan", "artifact", "skill_tool", "mcp_tool", "browser", "computer",
-		"runtime_read", "environment_read", "environment", "screenshot_capture", "secret_provide",
+		"execute", "plan", "artifact", "skill_tool", "mcp_tool",
+		"runtime_read", "screenshot_capture", "secret_provide",
 	}
 	if len(byName) != len(expectedTools) {
 		t.Fatalf("tools/list count=%d, want %d: %v", len(byName), len(expectedTools), byName)
@@ -241,7 +240,7 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 			t.Fatalf("decode %s: %v", name, err)
 		}
 		rawOutputSchema, hasOutputSchema := listedTool["outputSchema"]
-		if name == "mcp_tool" || name == "computer" {
+		if name == "mcp_tool" {
 			if hasOutputSchema && rawOutputSchema != nil {
 				t.Fatalf("%s must omit outputSchema: %+v", name, rawOutputSchema)
 			}
@@ -263,6 +262,9 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 		}
 		if strings.Contains(string(inputSchema), `"goal"`) {
 			t.Fatalf("%s must not expose deprecated goal: %s", name, inputSchema)
+		}
+		if strings.Contains(string(inputSchema), `"execution_mode"`) {
+			t.Fatalf("%s must not expose generic Operation execution_mode: %s", name, inputSchema)
 		}
 		for _, forbidden := range []string{"presentation", "renderer", "show_source", "density"} {
 			if strings.Contains(string(inputSchema), `"`+forbidden+`"`) {
@@ -379,7 +381,7 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 
 	needsPurpose := func(name string, args map[string]any) bool {
 		switch name {
-		case "edit", "execute", "plan", "operation_batch", "screenshot_capture", "secret_provide", "computer":
+		case "edit", "execute", "plan", "screenshot_capture", "secret_provide":
 			return true
 		case "skill_tool", "mcp_tool":
 			return fmt.Sprint(args["action"]) == "call"

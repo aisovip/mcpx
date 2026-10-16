@@ -7,7 +7,6 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"mcpx/internal/desktop"
 	"mcpx/internal/logging"
 	"mcpx/internal/server"
 	buildversion "mcpx/internal/version"
@@ -86,8 +85,6 @@ func main() {
 			os.Exit(runUpdate(os.Args[2:], build))
 		case "stop":
 			os.Exit(runStop())
-		case "desktop":
-			os.Exit(runDesktop(os.Args[2:]))
 		case "help", "-h", "--help":
 			printUsage()
 			os.Exit(0)
@@ -180,23 +177,12 @@ func runStop() int {
 	return 0
 }
 
-// runDesktop 启动托盘与 GUI，是 `mcpx desktop` 的入口。
-// 桌面端只在 Windows 上实现；其他平台由 internal/desktop 的占位实现返回错误，
-// 这样跨平台 CLI 不必链接 Wails。
-func runDesktop(args []string) int {
-	if err := desktop.Run(args); err != nil {
-		fmt.Fprintf(os.Stderr, "mcpx desktop: %v\n", err)
-		return 1
-	}
-	return 0
-}
-
 func isUnknownPositionalArg(arg string) bool {
 	if arg == "" || strings.HasPrefix(arg, "-") {
 		return false
 	}
 	switch arg {
-	case "observe", "workspace", "oauth-register", "update", "stop", "desktop", "help":
+	case "observe", "workspace", "oauth-register", "update", "stop", "help":
 		return false
 	default:
 		return true
@@ -214,7 +200,6 @@ func printUsage() {
 Usage:
   mcpx [flags]                     启动 Streamable HTTP 服务
   mcpx stop                        停止后台服务
-  mcpx desktop                     启动托盘与图形界面（仅 Windows；-tray 只驻留托盘不开窗口）
   mcpx observe [flags] <name>      终端只读观测 Workspace 事件
   mcpx workspace register <path>  注册或更新 Workspace（不启动服务）
   mcpx oauth-register [url]        动态注册 OAuth 客户端（粘贴 ChatGPT 回调 URL）

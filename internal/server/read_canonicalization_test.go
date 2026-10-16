@@ -75,7 +75,7 @@ func TestReadPublicSchemaDoesNotRequireView(t *testing.T) {
 	}
 	properties, _ := schema["properties"].(map[string]any)
 	if properties["sections"] != nil || properties["snapshot_id"] != nil {
-		t.Fatalf("read must not duplicate environment_read fields: %s", encoded)
+		t.Fatalf("read schema must not contain environment snapshot fields: %s", encoded)
 	}
 	if properties["include_sha256"] != nil {
 		t.Fatalf("content-bearing reads always return revision; include_sha256 must not be client bookkeeping: %s", encoded)

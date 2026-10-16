@@ -3,7 +3,6 @@ package server
 import (
 	"mcpx/internal/edit"
 	"mcpx/internal/file"
-	"mcpx/internal/operation"
 	"mcpx/internal/source"
 )
 
@@ -20,9 +19,6 @@ func publishedLimits() map[string]any {
 			"max_source_bytes":   file.MaxSourceBytes,
 			"max_items":          MaxReadItems,
 			"max_direct_entries": source.MaxDirectListEntries,
-		},
-		"operation_batch": map[string]any{
-			"max_steps": operation.MaxSteps,
 		},
 		"edit": map[string]any{
 			"max_changed_lines": edit.MaxChangedLines,

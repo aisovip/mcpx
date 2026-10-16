@@ -18,7 +18,7 @@ func TestReadOnlyToolAnnotationsAndSessionOpenDefaults(t *testing.T) {
 	if _, exists := tools["approval_manage"]; exists {
 		t.Fatal("approval_manage must not be exposed; semantic confirmation uses the original tool")
 	}
-	for _, name := range []string{"observe", "read", "runtime_read", "environment_read"} {
+	for _, name := range []string{"observe", "read", "runtime_read"} {
 		annotation := tools[name].Annotations
 		if !annotation.ReadOnlyHint || annotation.DestructiveHint != nil && *annotation.DestructiveHint || !annotation.IdempotentHint {
 			t.Fatalf("%s annotation is unsafe or incomplete: %+v", name, annotation)

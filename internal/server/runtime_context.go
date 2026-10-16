@@ -31,7 +31,6 @@ const (
 
 type runtimeContextKey struct{}
 type toolInvocationNameKey struct{}
-type operationChildKey struct{}
 type cleanCoreRequestKey struct{}
 
 var opaqueIDFallbackCounter atomic.Uint64
@@ -42,8 +41,6 @@ var opaqueIDFallbackCounter atomic.Uint64
 type RuntimeContext struct {
 	RequestID          string
 	OperationID        string
-	ParentOperationID  string
-	StepID             string
 	TraceID            string
 	SpanID             string
 	ParentSpanID       string
@@ -186,15 +183,6 @@ func withCleanCoreRequest(ctx context.Context) context.Context {
 
 func isCleanCoreRequest(ctx context.Context) bool {
 	value, _ := ctx.Value(cleanCoreRequestKey{}).(bool)
-	return value
-}
-
-func withOperationChild(ctx context.Context) context.Context {
-	return context.WithValue(ctx, operationChildKey{}, true)
-}
-
-func isOperationChild(ctx context.Context) bool {
-	value, _ := ctx.Value(operationChildKey{}).(bool)
 	return value
 }
 

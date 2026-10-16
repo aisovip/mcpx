@@ -9,8 +9,8 @@ import (
 	"mcpx/internal/mcpresult"
 )
 
-// toolRead is the clean-core source read entry point. Environment facts use
-// environment_read so each semantic operation has one canonical public tool.
+// toolRead is the clean-core source read entry point. Runtime capabilities and
+// project context use runtime_read so each semantic operation has one canonical tool.
 func (r *Runtime) toolRead(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	req, view := canonicalReadRequest(req)
 	switch view {

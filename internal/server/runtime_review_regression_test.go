@@ -3,22 +3,17 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"mcpx/internal/edit"
 	"mcpx/internal/envelope"
 	"mcpx/internal/file"
 	"mcpx/internal/idempotency"
-	"mcpx/internal/operation"
 	"mcpx/internal/winproc"
 )
 
@@ -88,87 +83,6 @@ func TestReviewEditCanonicalPolicy(t *testing.T) {
 	}
 }
 
-func TestReviewSDKConfirmationKeepsDAGWaiting(t *testing.T) {
-	rt := newWorkspaceRuntime(t, "review")
-	s := operationTestSession(t, rt, "review")
-	rt.cfg.Security.Commands.Default = "confirm"
-	rt.cfg.Security.Commands.Allow = nil
-	protocol := mcp.NewServer(&mcp.Implementation{Name: "review-confirm", Version: "test"}, nil)
-	rt.registerTools(protocol)
-	httpServer := httptest.NewServer(NewGateway(rt.cfg, nil, mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return protocol }, &mcp.StreamableHTTPOptions{DisableLocalhostProtection: true, Stateless: true})).Handler())
-	defer httpServer.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	client, err := mcp.NewClient(&mcp.Implementation{Name: "review-client", Version: "test"}, nil).Connect(ctx, &mcp.StreamableClientTransport{Endpoint: httpServer.URL + "/mcp"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close()
-	call := func(name string, args map[string]any) map[string]any {
-		t.Helper()
-		result, err := client.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return decodeToolResult(t, result)
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	output := filepath.Join(s.WorkspacePath, "once.json")
-	args := map[string]any{"remote_session_id": s.ID, "purpose": "确认 DAG 回归", "operation_id": "confirm-dag", "operations": []any{
-		map[string]any{"id": "a", "tool": "execute", "arguments": map[string]any{"action": "run", "argv": []any{executable, "-test.run=^TestIssue823ArgvChild$", "--", "--issue823-argv-child", output, "once"}, "shell": false, "idempotency_key": "confirm-dag-a"}},
-		map[string]any{"id": "b", "tool": "read", "depends_on": []any{"a"}, "arguments": map[string]any{"view": "file", "path": "once.json"}},
-	}}
-	accepted := call("operation_batch", args)
-	if accepted["status"] != "accepted" {
-		t.Fatalf("submit: %+v", accepted)
-	}
-	waitArgs := map[string]any{"remote_session_id": s.ID, "operation_id": "confirm-dag", "action": "wait", "timeout_ms": 4000}
-	wireWaiting := call("operation_manage", waitArgs)
-	wireData, ok := wireWaiting["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("HTTP wait 无数据: %+v", wireWaiting)
-	}
-	wireSteps, ok := wireData["steps"].([]any)
-	if !ok || len(wireSteps) != 2 {
-		t.Fatalf("HTTP wait 无步骤: %+v", wireData)
-	}
-	wireA := wireSteps[0].(map[string]any)
-	wireToken, ok := wireA["confirmation_token"].(string)
-	if !ok || wireToken == "" || wireA["state"] != "waiting_confirmation" || wireSteps[1].(map[string]any)["state"] != "queued" {
-		t.Fatal("HTTP 等待回执缺恢复字段")
-	}
-	waiting, err := rt.operations.Get(ctx, "confirm-dag")
-	if err != nil || waiting.State != operation.StateWaitingConfirmation {
-		t.Fatalf("提前成功: %s %v", waiting.State, err)
-	}
-	if waiting.Steps[1].State != operation.StateQueued {
-		t.Fatal("后继未等待")
-	}
-	if _, err := os.Stat(output); !os.IsNotExist(err) {
-		t.Fatal("确认前启动子进程")
-	}
-	resumed := call("operation_manage", map[string]any{"remote_session_id": s.ID, "operation_id": "confirm-dag", "action": "resume", "step_id": "a", "confirmation_token": wireToken})
-	if resumed["status"] == "failed" {
-		t.Fatalf("resume: %+v", resumed)
-	}
-	call("operation_manage", waitArgs)
-	final, err := rt.operations.Get(ctx, "confirm-dag")
-	if err != nil || final.State != operation.StateSucceeded {
-		t.Fatalf("未完成: %+v err=%v", final, err)
-	}
-	content, err := os.ReadFile(output)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var once []string
-	if json.Unmarshal(content, &once) != nil || !reflect.DeepEqual(once, []string{"once"}) {
-		t.Fatal("效果非唯一")
-	}
-}
-
 func TestReviewEditCrashReadbackRecovery(t *testing.T) {
 	rt := newWorkspaceRuntime(t, "review")
 	s := operationTestSession(t, rt, "review")
@@ -224,64 +138,5 @@ func TestReviewEditCrashReadbackRecovery(t *testing.T) {
 	content, _ := os.ReadFile(filepath.Join(s.WorkspacePath, "crash.txt"))
 	if rb == nil || rb.ByteLength != len(content) || rb.SHA256 != stored.Result.Results[0].NewSHA256 || rb.Format.LineEnding != "CRLF" || rb.TailHex == "" {
 		t.Fatalf("恢复回执缺完整字节证明: %+v", rb)
-	}
-}
-
-func TestReviewDelayedChild(t *testing.T) {
-	for i, arg := range os.Args {
-		if arg != "--review-delayed-child" {
-			continue
-		}
-		if err := os.WriteFile(os.Args[i+1], []byte("started"), 0600); err != nil {
-			os.Exit(2)
-		}
-		time.Sleep(1500 * time.Millisecond)
-		if err := os.WriteFile(os.Args[i+2], []byte("late"), 0600); err != nil {
-			os.Exit(3)
-		}
-		os.Exit(0)
-	}
-}
-
-func TestReviewCancelStopsActualTaskAndFreezesTerminal(t *testing.T) {
-	rt := newWorkspaceRuntime(t, "review")
-	s := operationTestSession(t, rt, "review")
-	rt.cfg.Security.Commands.Default = "allow"
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	started := filepath.Join(s.WorkspacePath, "started")
-	late := filepath.Join(s.WorkspacePath, "late")
-	accepted := callOperationTool(t, rt, "execute", map[string]any{"remote_session_id": s.ID, "purpose": "取消真实 Task 回归", "action": "run", "execution_mode": "async", "yield_time_ms": 1, "argv": []any{executable, "-test.run=^TestReviewDelayedChild$", "--", "--review-delayed-child", started, late}, "shell": false})
-	if accepted["status"] != "accepted" {
-		t.Fatalf("未提交: %+v", accepted)
-	}
-	id := acceptedOperationID(accepted)
-	if id == "" {
-		t.Fatalf("operation id missing: %+v", accepted)
-	}
-	deadline := time.Now().Add(time.Second)
-	for {
-		if _, err := os.Stat(started); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("子进程未启动")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	callOperationTool(t, rt, "operation_manage", map[string]any{"remote_session_id": s.ID, "operation_id": id, "action": "cancel"})
-	final, timeout, err := rt.operations.Wait(context.Background(), id, time.Second)
-	if err != nil || timeout || final.State != operation.StateCancelled {
-		t.Fatalf("取消未收敛: %s %v", final.State, err)
-	}
-	time.Sleep(1600 * time.Millisecond)
-	if _, err := os.Stat(late); !os.IsNotExist(err) {
-		t.Fatal("取消终态之后仍产生写入")
-	}
-	after, err := rt.operations.Get(context.Background(), id)
-	if err != nil || !reflect.DeepEqual(final, after) {
-		t.Fatal("终态快照被迟到结果改写")
 	}
 }

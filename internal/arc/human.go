@@ -56,14 +56,6 @@ func RenderToolContent(tool, resultType, renderer, summary string, data any) (st
 		if text, ok := renderEditConfirmation(summary, asMap); ok {
 			return text, true
 		}
-	case "operation_manage", "operation_batch":
-		if text, ok := renderOperationConfirmation(summary, asMap); ok {
-			return text, true
-		}
-		// Human summary only — models must use structuredContent.data.
-		if text, ok := renderOperationHumanSummary(summary, asMap); ok {
-			return text, true
-		}
 	}
 
 	if text, ok := renderProjectData(summary, asMap); ok {
@@ -246,46 +238,6 @@ func markdownCodeBlock(language, value string) string {
 		fence += "`"
 	}
 	return fence + language + "\n" + value + "\n" + fence
-}
-
-// renderOperationConfirmation exposes the waiting operation id and step
-// confirmation tokens in the model-facing text; operation_manage resumes
-// require both and neither is otherwise visible when a host collapses metadata.
-func renderOperationConfirmation(summary string, data map[string]any) (string, bool) {
-	if data["confirmation_required"] != true && data["status"] != "waiting_confirmation" {
-		return summary, false
-	}
-	operationID := humanField(data, "operation_id")
-	steps := humanMaps(data["steps"])
-	items := humanMaps(data["items"])
-	if operationID == "" && len(steps) == 0 && len(items) == 0 {
-		return summary, false
-	}
-	var builder strings.Builder
-	builder.WriteString("异步操作等待语义确认：请向用户展示操作摘要，确认后使用 operation_manage action=resume 恢复。")
-	if operationID != "" {
-		fmt.Fprintf(&builder, "\n- operation_id: %s", inlineCode(operationID))
-	}
-	for _, step := range steps {
-		token := humanField(step, "confirmation_token")
-		if token == "" {
-			continue
-		}
-		fmt.Fprintf(&builder, "\n- step_id: %s", inlineCode(humanField(step, "id")))
-		fmt.Fprintf(&builder, "\n- confirmation_token: %s", inlineCode(token))
-	}
-	for _, item := range items {
-		if itemID := humanField(item, "operation_id"); itemID != "" {
-			fmt.Fprintf(&builder, "\n- operation_id: %s", inlineCode(itemID))
-		}
-		for _, step := range humanMaps(item["steps"]) {
-			if token := humanField(step, "confirmation_token"); token != "" {
-				fmt.Fprintf(&builder, "\n- step_id: %s", inlineCode(humanField(step, "id")))
-				fmt.Fprintf(&builder, "\n- confirmation_token: %s", inlineCode(token))
-			}
-		}
-	}
-	return strings.TrimSpace(builder.String()), true
 }
 
 func renderWorkspaceList(summary string, data map[string]any) (string, bool) {
@@ -687,45 +639,6 @@ func renderProjectData(summary string, data map[string]any) (string, bool) {
 		builder.WriteString("\n```")
 	}
 	return strings.TrimSpace(builder.String()), true
-}
-
-// renderOperationHumanSummary is for people only. Models must read structuredContent.
-func renderOperationHumanSummary(summary string, data map[string]any) (string, bool) {
-	if data["confirmation_required"] == true || data["status"] == "waiting_confirmation" {
-		return summary, false
-	}
-	state := humanField(data, "state")
-	if state == "" {
-		state = humanField(data, "status")
-	}
-	opID := humanField(data, "operation_id")
-	purpose := compactHuman(humanField(data, "purpose"))
-	var builder strings.Builder
-	if strings.TrimSpace(summary) != "" && !isGenericSummary(summary) {
-		builder.WriteString(strings.TrimSpace(summary))
-	} else {
-		builder.WriteString("异步操作")
-		if state != "" {
-			fmt.Fprintf(&builder, " %s", state)
-		}
-	}
-	if opID != "" {
-		fmt.Fprintf(&builder, "\n- operation_id: %s", inlineCode(opID))
-	}
-	if purpose != "" {
-		fmt.Fprintf(&builder, "\n- purpose: %s", purpose)
-	}
-	if items := humanMaps(data["items"]); len(items) > 0 {
-		fmt.Fprintf(&builder, "\n- items: %d", len(items))
-	}
-	if steps := humanMaps(data["steps"]); len(steps) > 0 {
-		fmt.Fprintf(&builder, "\n- steps: %d", len(steps))
-	}
-	out := strings.TrimSpace(builder.String())
-	if out == "" {
-		return summary, false
-	}
-	return out, true
 }
 
 func renderGenericData(summary string, data map[string]any) (string, bool) {

@@ -10,7 +10,7 @@ func TestLoadAgent(t *testing.T) {
 	if cfg.Version != "2.0" || len(cfg.Rules) < 8 || len(cfg.Rules) > 16 {
 		t.Fatalf("unexpected compact guidance: %+v", cfg)
 	}
-	if len(cfg.ToolRouting["modify_files"]) == 0 || len(cfg.ToolRouting["inspect_environment"]) == 0 {
-		t.Fatal("missing canonical routing")
+	if len(cfg.ToolRouting["modify_files"]) == 0 || len(cfg.ToolRouting["inspect_source"]) == 0 || len(cfg.ToolRouting["inspect_environment"]) != 0 {
+		t.Fatal("unexpected canonical routing")
 	}
 }

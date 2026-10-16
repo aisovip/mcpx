@@ -34,13 +34,13 @@ func TestResolveBuildProvenanceFallsBackToVCSRevision(t *testing.T) {
 }
 
 func TestIsUnknownPositionalArg(t *testing.T) {
-	unknown := []string{"skills", "foo", "start", "daemon"}
+	unknown := []string{"skills", "foo", "start", "daemon", "desktop"}
 	for _, arg := range unknown {
 		if !isUnknownPositionalArg(arg) {
 			t.Fatalf("%q must be rejected as an unknown positional argument", arg)
 		}
 	}
-	known := []string{"", "-addr", "--help", "-h", "-d", "-version", "observe", "workspace", "oauth-register", "update", "stop", "desktop", "help"}
+	known := []string{"", "-addr", "--help", "-h", "-d", "-version", "observe", "workspace", "oauth-register", "update", "stop", "help"}
 	for _, arg := range known {
 		if isUnknownPositionalArg(arg) {
 			t.Fatalf("%q must not be treated as an unknown positional argument", arg)

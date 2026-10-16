@@ -221,7 +221,7 @@ func TestCommandExecuteTruncatedOutputStaysInline(t *testing.T) {
 	if !strings.Contains(content.Text, "Output truncated") {
 		t.Fatalf("truncation must be stated in the text: %q", content.Text)
 	}
-	if !strings.Contains(content.Text, "task_control") && !strings.Contains(content.Text, "task_read") {
-		t.Fatalf("truncation notice must point to task_control or task_read: %q", content.Text)
+	if !strings.Contains(content.Text, "execute(action=attach)") && !strings.Contains(content.Text, "observe(view=logs)") {
+		t.Fatalf("truncation notice must point to execute attach or task logs: %q", content.Text)
 	}
 }

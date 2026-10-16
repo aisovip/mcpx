@@ -128,32 +128,6 @@ func TestCleanCoreMissingCommandUsesExecutionTaxonomy(t *testing.T) {
 		t.Fatalf("missing command exit code=%+v", details)
 	}
 
-	accepted := callEnvelope(t, rt.toolHandlers["execute"], context.Background(), map[string]any{
-		"action": "run", "remote_session_id": remoteID, "purpose": "classify async command failure",
-		"command": "mcpx-command-that-does-not-exist", "scope": "workspace", "execution_mode": "async",
-	})
-	if accepted["status"] != "accepted" {
-		t.Fatalf("async missing command was not accepted as an operation: %+v", accepted)
-	}
-	acceptedData, _ := accepted["data"].(map[string]any)
-	operationID, _ := acceptedData["operation_id"].(string)
-	if operationID == "" {
-		t.Fatalf("async operation id missing: %+v", accepted)
-	}
-	completed := callEnvelope(t, rt.toolHandlers["operation_manage"], context.Background(), map[string]any{
-		"remote_session_id": remoteID, "action": "wait", "operation_id": operationID, "timeout_ms": 5000,
-	})
-	if statusOK(completed) || errorCode(completed) != "operation_failed" {
-		t.Fatalf("async operation failure=%+v", completed)
-	}
-	operationError, _ := completed["error"].(map[string]any)
-	if operationError["category"] != "execution" || operationError["retryable"] != false {
-		t.Fatalf("async operation taxonomy=%+v", operationError)
-	}
-	operationDetails, _ := operationError["details"].(map[string]any)
-	if operationDetails["exit_code"] != wantMissingExit {
-		t.Fatalf("async operation exit code=%+v", operationDetails)
-	}
 }
 
 func TestCleanCorePlanEvidenceAndArtifactWorkflow(t *testing.T) {

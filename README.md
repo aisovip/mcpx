@@ -1,7 +1,7 @@
 # MCPX
 
 MCPX 是运行在本地开发环境中的 MCP Runtime（网关）。它通过
-Streamable HTTP 把本地 Workspace、源码、变更、命令、任务、环境和扩展能力
+Streamable HTTP 把本地 Workspace、源码、变更、命令、任务和扩展能力
 安全地提供给 ChatGPT、Claude、Cursor、Grok 等 MCP 客户端。
 
 MCPX 的重点不是增加一个聊天界面，而是提供一套可审计、可恢复、对模型友好
@@ -17,14 +17,11 @@ Edit ID、Task ID 和能力版本避免重复读取和无效重试；Skill/MCP �
 | Source | 文件窗口、批量读取、搜索、文件列表和有界上下文；返回 SHA-256 与编码/换行元数据 |
 | Edit | 精确 replacement、批量变更、原子写、SHA 校验和格式保留 |
 | Terminal | 执行命令或项目 Task；短命令内联返回，长命令持久化为 Task |
-| Operation | 并行或有依赖地执行多个公开工具，并统一等待、分页、取消和恢复 |
 | Project Task | 从项目配置中发现测试、构建和检查任务，并解析诊断信息 |
 | Workspace State | 读取 Git 状态、快照、差异、监听结果和项目记忆 |
-| Environment | 查看操作系统、架构、Shell、容器、资源、文件系统和工具链 |
 | Extension | Session 建立时曝光 compact inventory，并通过统一 `skill_tool` / `mcp_tool` 按需 list、describe、call |
 | Artifact | 注册、列出和分页读取测试报告、构建产物、覆盖率和日志 |
 | Screenshot | 截取显示器或屏幕区域，并通过 MCP ImageContent 返回 |
-| Computer Use | 通过持久 JavaScript REPL 控制 macOS / Windows 桌面应用；原生动作由 `open-computer-use` 提供 |
 | Security | OAuth、Bearer、Remote Session ACL、命令/文件策略和语义确认 |
 | Observation | 通过本机 Socket 观察工具调用、Task、Edit 和操作事件 |
 
@@ -35,13 +32,13 @@ flowchart LR
     Client[ChatGPT / Claude / Cursor / Grok] -->|Streamable HTTP /mcp| Runtime[MCPX Runtime]
     Runtime --> Session[Remote Session / ACL]
     Runtime --> Tools[Core & Support Tools]
-    Runtime --> Orchestration[Operation / Plan]
+    Runtime --> Plans[Plan]
     Runtime --> Extension[Skill / Upstream MCP]
     Runtime --> Observe[Observation / Audit]
 
     Session --> Workspace[(Registered Workspace)]
     Tools --> Workspace
-    Orchestration --> Tools
+    Plans --> Tools
     Extension --> Skills[Local Skills]
     Extension --> Upstream[Upstream MCP Servers]
 
@@ -57,13 +54,13 @@ Runtime 边界内；所有有状态操作都绑定 `remote_session_id`，并通�
 ## 公开工具
 
 `tools/list` 是工具名称、描述、参数 Schema 和 Annotation 的唯一权威来源。
-当前公开工具共 21 个，分为 12 个 core tools 和 9 个 support tools：
+当前公开工具共 15 个，分为 12 个 core tools 和 3 个 support tools：
 
 | 领域 | 工具 | 主要用途 |
 | --- | --- | --- |
 | Core | `workspace` | 零参数列出已注册 Workspace，供建立会话前选择 |
 | Core | `session` | 创建、恢复或关闭 Remote Session；省略 action 默认 open/resume |
-| Core | `read` | 读取、搜索、列举或组装 Workspace 源码上下文；环境事实使用 `environment_read` |
+| Core | `read` | 读取、搜索、列举或组装 Workspace 源码上下文 |
 | Core | `edit` | 创建、更新或重命名 Workspace 文件；使用 SHA revision guard 和幂等语义，不提供删除 |
 | Core | `move_out` | `prepare` 冻结明确的文件/目录/symlink manifest；用户确认后 `submit` 仅携带 `confirmation_uuid` |
 | Core | `observe` | 查看 session、Execution Task、Plan Task、history 或 logs；Workspace 静态内容使用 `read` |
@@ -73,47 +70,12 @@ Runtime 边界内；所有有状态操作都绑定 `remote_session_id`，并通�
 | Core | `artifact` | 产物登记、列表和分片读取 |
 | Core | `skill_tool` | Skill 生命周期唯一入口：`list`、`describe`、`call`；Runtime 内部管理 revision |
 | Core | `mcp_tool` | MCP Server/Tool 唯一入口：`list`、`describe`、`call`；Runtime 内部管理 schema revision |
-| Support | `operation_batch` | 并发或按依赖 DAG 执行多个公开工具操作 |
-| Support | `operation_manage` | 查询、等待、读取结果、取消和恢复异步 Operation |
 | Support | `runtime_read` | 读取运行时能力、项目摘要或适用指令 |
-| Support | `environment_read` | 读取当前主机/工具链环境或比较已保存快照 |
-| Support | `environment` | 保存当前环境快照 |
-| Support | `browser` | 通过官方 Browser Service 控制本机 ChatGPT/Codex 浏览器扩展 |
-| Support | `computer` | 通过持久 `js` / `reset` REPL 控制桌面应用；由模型决定操作，不增加 MCPX 二次审批 |
 | Support | `screenshot_capture` | 按明确 purpose 截取显示器或屏幕区域 |
 | Support | `secret_provide` | 按明确 purpose 提供仅驻留内存的 Secret |
 
 `workspace` 和 `session` 负责发现 Workspace 与建立/恢复会话；进入 Workspace 后，源码变更、命令、
-Plan、Artifact 等有状态操作都以服务端返回的完整 `remote_session_id` 为关联主键。`runtime_read`、
-`environment_read` 等读取型支持工具在参数足够时也可独立读取运行时或环境事实。
-
-### Computer Use 前置依赖
-
-`computer` 复用独立的 [Open Computer Use](https://github.com/iFurySt/open-codex-computer-use) 原生运行时，不在 MCPX 内实现 Accessibility 或 UI Automation。MCPX 需要**含 MCPX 补丁的构建**：上游 npm `open-computer-use@0.3.5` 缺少 `drag_path`、`list_windows`、`screenshot` 与窗口坐标元数据，调用这些能力时会返回明确错误而不是静默降级。
-
-```bash
-# 从 MCPX fork 构建原生 runtime（要求 Node.js 18+、Xcode CLI）
-cd ~/Workspace/code/ai/open-computer-use
-./scripts/build-open-computer-use-app.sh debug
-# 产物：dist/Open Computer Use (Dev).app/Contents/MacOS/OpenComputerUse
-```
-
-把构建产物指给 MCPX，然后启动服务：
-
-```bash
-export MCPX_COMPUTER_USE_BINARY="$HOME/Workspace/code/ai/open-computer-use/dist/Open Computer Use (Dev).app/Contents/MacOS/OpenComputerUse"
-mcpx
-```
-
-macOS 首次使用需给该构建授予 Accessibility 与 Screen Recording——它由本机证书签名，无法继承 npm 预编译包（上游 Developer ID）已有的授权。授权流程：先运行一次
-
-```bash
-"$MCPX_COMPUTER_USE_BINARY" doctor
-```
-
-按提示在“系统设置 → 隐私与安全性”中给 Open Computer Use (Dev) 打开两项权限，doctor 显示 `accessibility=granted, screenRecording=granted` 后即可使用。Windows 需在已登录桌面会话中运行；fork 的 Windows runtime 与 macOS 使用同一套契约（`list_windows`、`screenshot`、`window_id`、`read_back`、`activate`、`mcpx.window` 元数据、越界坐标拒绝），但坐标单位是系统物理像素，`drag_path` 只支持 `app_post`（不支持 `delivery: global`）。
-
-MCPX 会自动启动并持有 `open-computer-use mcp` 进程，无需额外安装 JS adapter；也可通过 `MCPX_COMPUTER_USE_NODE` 显式指定 Node 可执行文件。
+Plan、Artifact 等有状态操作都以服务端返回的完整 `remote_session_id` 为关联主键。`runtime_read` 可在参数足够时独立读取运行时能力、项目摘要或适用指令。
 
 ## 设计边界
 
@@ -122,7 +84,7 @@ MCPX 同时处理两类 Session：
 | 标识 | 生命周期 | 用途 |
 | --- | --- | --- |
 | `Mcp-Session-Id` | Streamable HTTP 传输层临时标识 | 连接和协议状态，重连或换客户端后可能变化 |
-| `remote_session_id` | SQLite 持久化业务标识 | Workspace、角色、Edit、Task、Plan、操作、快照和产物的主键 |
+| `remote_session_id` | SQLite 持久化业务标识 | Workspace、角色、Edit、Task、Plan、文件快照和产物的主键 |
 
 客户端应始终原样保存并复用服务端返回的 `remote_session_id`、`edit_id`、`plan_id`、
 `plan_task_id`、`execution_task_id`、`operation_id` 和 `artifact_id`，不能自行缩写、猜测或从历史日志重建这些标识。
@@ -137,7 +99,7 @@ MCPX 只提供 Streamable HTTP 的 `/mcp` 端点，不提供旧版 HTTP+SSE 的 
 - [FRP + Caddy 原生部署：公网暴露 MCPX（非 Docker）](docs/frp-caddy-native.md)
 - [FRP + Caddy + Docker Compose：公网暴露 MCPX（MCPX 保持原生运行）](docs/frp-caddy-docker-compose.md)
 
-两篇教程都保持 MCPX 原生运行，保留对本地 Workspace、工具链、桌面和扩展能力的访问。原生版直接运行 Caddy/frps/frpc；Docker Compose 版只容器化 Caddy/frps/frpc。两篇文档均包含 OpenAI / ChatGPT Remote MCP 配置示例与截图。
+两篇教程都保持 MCPX 原生运行，保留对本地 Workspace、工具链、截图和扩展能力的访问。原生版直接运行 Caddy/frps/frpc；Docker Compose 版只容器化 Caddy/frps/frpc。两篇文档均包含 OpenAI / ChatGPT Remote MCP 配置示例与截图。
 
 ## 快速开始
 
@@ -215,7 +177,7 @@ http://127.0.0.1:9090/mcp
 | `logs/` | JSONL 审计和运行日志 |
 | `skills/` | 可选的本地 Skill 根目录 |
 | `workspaces.example.yaml` | Workspace 配置示例 |
-| `state/mcpx.db` | Remote Session、Edit、Task、Plan、操作、快照和产物索引 |
+| `state/mcpx.db` | Remote Session、Edit、Task、Plan、快照和产物索引 |
 | `tasks/` | 持久终端 Task 的日志文件 |
 
 查看版本和命令帮助：
@@ -230,7 +192,6 @@ http://127.0.0.1:9090/mcp
 ```text
 mcpx [flags]                     启动 Streamable HTTP 服务
 mcpx stop                        停止后台服务
-mcpx desktop                     启动托盘与图形界面（仅 Windows）
 mcpx observe [flags] <name>      终端只读观测 Workspace 事件
 mcpx workspace register <path>   注册或更新 Workspace（不启动服务）
 mcpx oauth-register [url]        动态注册 OAuth 客户端
@@ -474,7 +435,7 @@ curl -sS -m 5 \
    在 `describe → call` 间维护和复核，不作为公开缓存字段。当前公开 Schema 不接受 `known_revisions` 参数。
 
 ARC 2.0 将工具 effect 与 Agent 语义轨迹分开：`purpose` 只描述本次工具操作的作用，
-`plan_id`、`plan_task_id`、`execution_task_id`、`operation_id` 用于绑定执行上下文。Client Protocol Activity V3 直接嵌入会话内 MCP 工具参数：可选 `activity` 对象允许同一次调用同时提供 `intent`、`hypothesis`、`evidence`、`conclusion`、`next`、`status`，但只应填写本次发生实质变化的字段，不重复未变化内容。`intent` 是整个工作 turn 的目标并开启新 turn；`hypothesis` 是待验证且可被推翻的暂定判断；`evidence` 只写刚获得的可核验事实；`conclusion` 写由 evidence 支持的当前判断；`next` 表示立即要执行且与当前 tool call 对齐的动作；`status` 只用于无法归入前五类的阶段、等待或阻塞变化。Runtime 按固定顺序展开非空字段，并自动生成 `turn_id`、`sequence`、`state=preparing_action`、`related_call_id`。旧 `/mcp/activity` HTTP ingress 已移除。服务端只把已经接受并持久化的真实 Activity snapshot 放入 `_meta["mcpx.result"].mcpx.result.context.activity` 和观测数据；模型侧 `structuredContent.context` 不再重复 Activity snapshot。ARC 不直接复制 raw tool input，也不会从工具结果反推、伪造 Activity。`reasoning_summary`、`progress_summary`、`next_step` 不再属于 ARC context。
+`plan_id`、`plan_task_id`、`execution_task_id` 用于绑定业务上下文；`operation_id` 是可选的事件关联标识，不提供异步操作管理能力。Client Protocol Activity V3 直接嵌入会话内 MCP 工具参数：可选 `activity` 对象允许同一次调用同时提供 `intent`、`hypothesis`、`evidence`、`conclusion`、`next`、`status`，但只应填写本次发生实质变化的字段，不重复未变化内容。`intent` 是整个工作 turn 的目标并开启新 turn；`hypothesis` 是待验证且可被推翻的暂定判断；`evidence` 只写刚获得的可核验事实；`conclusion` 写由 evidence 支持的当前判断；`next` 表示立即要执行且与当前 tool call 对齐的动作；`status` 只用于无法归入前五类的阶段、等待或阻塞变化。Runtime 按固定顺序展开非空字段，并自动生成 `turn_id`、`sequence`、`state=preparing_action`、`related_call_id`。旧 `/mcp/activity` HTTP ingress 已移除。服务端只把已经接受并持久化的真实 Activity snapshot 放入 `_meta["mcpx.result"].mcpx.result.context.activity` 和观测数据；模型侧 `structuredContent.context` 不再重复 Activity snapshot。ARC 不直接复制 raw tool input，也不会从工具结果反推、伪造 Activity。`reasoning_summary`、`progress_summary`、`next_step` 不再属于 ARC context。
 `move_out(action="submit")` 的业务参数只有 `action`、`remote_session_id`、`confirmation_uuid`；公共可选 `activity` 只记录公开工作轨迹，不改变 prepare 时由服务端冻结的业务语义。
 `progress` 不作为每个普通工具调用的 heartbeat；过程只在有业务意义的里程碑、等待、阻塞或失败时发布。任务正常完成并准备给用户最终回复前，必须调用一次 `progress(status="completed")`，用 `current` 汇总完成状态、`result` 列出已验证结果。
 
@@ -483,7 +444,7 @@ durable Store，再通过本地 JSONL 帧推送；`observe --format=json`、终�
 其他 JSONL 客户端消费同一事件。事件的 `phase` 表示 `action_started`、`output`、
 `result` 或 `error`，语义上下文字段会在 JSONL、历史和 text observer 中保留。`call_id` 缺省回退为
 `request_id` 用于内部请求关联；不同客户端接力时使用同一个 `remote_session_id`，并可结合
-`workspace` 调用 `observe(view="history")` 查询历史操作。`plan_task_id`、`execution_task_id`、`operation_id` 负责各自的计划、执行和操作归属。
+`workspace` 可调用 `observe(view="history")` 查询历史事件。`plan_task_id`、`execution_task_id` 和 `operation_id` 可用于筛选关联事件。
 
 ### 2. 读取源码
 
@@ -547,9 +508,8 @@ Base64 解码后的文本字节原样落盘，不补换行、不转换 BOM 或�
 使用 `observe(view="diff", edit_id, offset, limit)` 分片读取。
 
 生产限制和破坏性操作契约：完整 `read` 的源文件上限为 4 MiB，超大文件使用
-`mode="window"` 流式读取；单次 `read.items` 最多 20 项；`operation_batch` 最多
-32 步；`edit` 最多 1000 条真实变更行。`read(view="list", path=...)` 的 `path`
-是硬作用域。
+`mode="window"` 流式读取；单次 `read.items` 最多 20 项；`edit` 最多 1000 条真实变更行。
+`read(view="list", path=...)` 的 `path` 是硬作用域。
 
 `edit` 只支持 create、update、rename；删除、移除或清理必须使用同一个 `move_out` 工具的两阶段 action，
 禁止通过 `execute`、shell、glob 或 symlink 绕过：
@@ -644,11 +604,6 @@ execute(action="attach", execution_task_id="task_...", yield_time_ms=30000)
 直接给出下一次调用模板。`stop` 和 `stdin` 通过 `execute(action="stop|stdin")`
 完成，并重新执行权限与 Workspace 校验。
 
-`execution_mode="async"` 只表示把本次工具调用提交为异步 Operation，不保证立即返回
-`execution_task_id`。命令是否脱离为持久化执行 Task 由 `yield_time_ms` 决定：命令在等待窗口内结束时，
-Operation 结果直接包含 `completed_in_call=true`；需要 Task 生命周期时，应设置小于预期
-运行时长的 `yield_time_ms`，再使用返回的 `execution_task_id` 调用 `observe` 或 `execute(action="attach")`。
-
 ### 5. Plan、Artifact 与扩展
 
 `plan(action="create|read|advance|complete|block|replan|deliver")` 只引用服务端
@@ -678,27 +633,7 @@ MCP：不知道 Server 时 `list`；知道 Server 但不知道 Tools 时 `list(s
 
 MCP 的 `call` 在同一个已初始化的上游实例内完成 `tools/list`、schema 校验和 `tools/call`，不会先检查实例 A、再执行实例 B。Session inventory 与 `mcp_tool(action=list)` 只返回 Server 名称、description 和状态，用于第一轮 relevance routing；完整 Tool schema 仍需按需 `describe`。
 
-### 6. 批量和异步操作
-
-需要并行读取或执行多个相互独立的工具时使用 `operation_batch`；有依赖时在
-`depends_on` 中声明步骤 ID。使用 `operation_manage`：
-
-```text
-operation_manage(action="wait", operation_id="op_...")
-operation_manage(action="result", operation_id="op_...")
-```
-
-不要通过重复 `status` 轮询等待同一个操作；运行中的操作会返回一次性的
-`structuredContent.actions` continuation，通常应直接执行一次 `wait`。`operation_manage` 的批量模式只接受
-`operation_ids`，且仅支持 `status` 和 `result`，不能把它再次嵌套进
-`operation_batch`。
-
-当异步操作内部执行 `execute` 时，MCPX 会等待其终端 Task 进入最终状态后
-再记录 `operation.completed`。`wait` 直接在 `steps[].result` 返回已展开的机器结果，
-不会再额外复制一份顶层 aggregate/raw MCP envelope；需要聚合结果或分页字节时显式调用
-`operation_manage(action="result")`。客户端不需要解析嵌套的 `content[].text`。
-
-### 7. 统一响应
+### 6. 统一响应
 
 工具默认文本适合模型和宿主直接展示；机器结果同时保存在
 `structuredContent` 和 ARC 元数据 `_meta["mcpx.result"]`。响应状态包括：
@@ -715,7 +650,7 @@ operation_manage(action="result", operation_id="op_...")
 | 状态 | 含义 |
 | --- | --- |
 | `succeeded` | 操作已成功完成 |
-| `accepted` | 已交给持久化 Operation 或 Task，需按 ID 继续 |
+| `accepted` | 长命令已作为持久 Task 启动，按 `execution_task_id` 继续 |
 | `waiting_confirmation` | 需要先向用户展示摘要并获得明确确认 |
 | `interrupted` | 执行被中断，但可根据返回 ID 查询状态 |
 | `failed` | 业务、策略、版本或运行时失败，应按结构化错误恢复 |
@@ -745,70 +680,7 @@ ARC 2.0 的 `structuredContent.context` 保持精简，只携带当前结果真�
 Activity snapshot 不再复制到模型侧 `structuredContent.context`；需要用户展示、审计或观测时，从 `_meta["mcpx.result"].mcpx.result.context.activity` 或 Runtime 观测数据读取。工具 timing 同样不在模型侧 `structuredContent` 重复，仍保留在 ARC trace metadata 与观测链路。字段不存在时不会为了填满结构而伪造。旧的 `reasoning_summary`、`progress_summary`、`next_step` 不属于公开 ARC context，
 语义轨迹统一通过 `activity` 表达。`progress` 负责用户可见的阶段与终态：过程按需发布里程碑、等待、阻塞或失败；正常任务在最终回复前固定发布一次 `completed`，并在 `result` 中列出已验证结果。新的 `session` bootstrap 还会返回最新的 model progress state（若存在）。
 
-终端文本按可用信息展示 `purpose`、最新 Activity 以及 Plan / Plan Task / Execution Task / Operation
-关联信息；`-detail` 再追加 call、path 等执行元数据。
-
-## 桌面托盘与图形界面
-
-Windows 上可以用托盘常驻管理服务：
-
-```bash
-./bin/mcpx desktop
-```
-
-启动后直接打开主窗口。只想静默驻留托盘时加 `-tray`：
-
-```bash
-./bin/mcpx desktop -tray
-```
-
-第一次启动 Desktop 后会自动在当前 Windows 用户的桌面创建/刷新 `MCPX.lnk`。
-快捷方式使用隐藏 PowerShell 启动 `mcpx.exe desktop`，因此以后可以直接双击
-桌面上的 **MCPX**，不需要先打开 PowerShell，也不会留下长期驻留的控制台黑框；
-`mcpx.exe` 本身仍保持 Console subsystem，以保证 CLI 命令的 stdout/stderr 正常。
-
-托盘负责服务状态指示与启动 / 停止 / 重启，图形界面提供四块内容：
-
-| 页面 | 内容 |
-| --- | --- |
-| 服务 | 运行状态、PID、监听地址、鉴权模式；启停控制；复制端点地址；监听地址与 Bearer Token 等基础连接配置 |
-| Cloudflare | 检测 / 安装 `cloudflared`；Quick / Named Tunnel 配置；Tunnel Token / ID；启停；公网 MCP URL；OAuth `server_url` 联动；健康检查与独立日志 |
-| Workspace | 已注册 Workspace 的增删改，标注路径已失效的条目 |
-| 日志 | 实时跟随 `~/.mcpx/logs/mcpx-daemon.log`，支持关键字过滤与清空 |
-
-### Desktop 管理 Cloudflare Tunnel（非 Docker）
-
-在 **Cloudflare** 页可以直接管理本机 `cloudflared`，不需要 Docker：
-
-- 自动检测系统 PATH、常见 Windows 安装目录，以及 MCPX 自管的 `~/.mcpx/bin/cloudflared.exe`。
-- 「安装 cloudflared」会把 Cloudflare 官方 GitHub Release 下载到 MCPX 运行时目录；卸载只删除 MCPX 自管版本，不碰系统安装。
-- 默认情况下 Cloudflare Tunnel 与本地 MCPX 生命周期分开管理：**「服务」页**的启动 / 停止 / 重启只操作本地 Runtime，Cloudflare 页可单独启动 / 停止公网 Tunnel。显式开启「随 MCPX 启停 Cloudflare Tunnel」后，服务页才会把本地 Runtime 与 Tunnel 作为整套服务联动管理。
-- **Quick** 模式自动把本机 MCPX 端口暴露为临时 `https://*.trycloudflare.com/mcp`，并从日志解析公网地址。
-- **Named** 模式使用 Cloudflare Tunnel Token 启动远程管理 Tunnel；可额外记录 Tunnel ID 便于识别。公网 hostname 仍需先在 Cloudflare 中配置，并在界面填写对应的 HTTPS Origin（例如 `https://mcp.example.com`）。
-- Tunnel Token 保存在 `~/.mcpx/cloudflare-desktop.json`，启动 cloudflared 时通过 `TUNNEL_TOKEN` 环境变量传递，不放进进程命令行。
-- 公网启动前会拒绝 `auth.mode: open`，并自动打开 MCPX 反向代理所需的 Host / proxy header 设置。
-- 开启「公网 Origin 自动联动 OAuth server_url」后，Named Tunnel 会在启动前同步 `auth.oauth.server_url`；Quick Tunnel 会在取得临时公网地址后同步，并按需重启 MCPX 使 OAuth metadata 立即使用新 Origin。
-- 「健康检查」同时检查 cloudflared、MCPX 本地端点、Tunnel 进程、公网 `/mcp` 和 OAuth metadata；cloudflared 输出单独写入 `~/.mcpx/logs/cloudflared.log`。
-- 可开启「自动健康检查并故障恢复」：Desktop 每 30 秒检查一次，连续 2 次出现本地 MCP、Tunnel、公网 MCP 或 5xx/网络类 OAuth metadata 异常时，会自动重启本地 MCPX 与 Cloudflare Tunnel，并设置 2 分钟冷却避免重启风暴；手动停止 Tunnel 会解除自动恢复，重新启动后再次生效。
-- 系统托盘的 **Cloudflare Tunnel** 子菜单会实时显示 Tunnel 状态和公网 MCP URL，并可直接启动 / 停止、运行健康检查、复制公网 MCP URL；健康检查结果会缓存显示为「正常 / 异常」，Tunnel 状态变化后自动失效。
-
-Quick Tunnel 适合临时开发和连通性验证；Cloudflare 官方说明 Quick Tunnel 不支持 SSE，因此需要稳定 URL、OAuth issuer
-或长期 Remote MCP 接入时应使用 Named Tunnel。
-
-界面右上角可在**跟随系统 / 浅色 / 深色**之间切换，选择记在本地，下次打开保持。
-选「跟随系统」时会实时响应 Windows 的应用主题变化。
-
-托盘进程与服务进程互相独立：**退出托盘不会停止后台服务**，不装桌面端也不影响 CLI 与 MCP 客户端。
-托盘菜单里的「开机自启」注册的是 `mcpx desktop -tray`，登录时只驻留托盘、不弹窗，也不会自动启动服务。
-
-界面写入 `config.yaml` 前会自动备份为 `config.yaml.bak`。注意写入是整份重新序列化，
-会丢失文件中的注释——这与 `mcpx workspace register` 的行为一致。
-
-状态判定有四种结果：`运行中`、`启动中`（进程在但端口未就绪）、`端口被其他进程占用`
-（没有受管 daemon 但端口已被占用，此时启动必然失败）和`已停止`。
-
-桌面端只在 Windows 上构建；`mcpx desktop` 在 Linux / macOS 上会直接提示仅支持 Windows，
-这些平台的二进制不会链接任何 GUI 依赖。
+终端文本按可用信息展示 `purpose`、最新 Activity 以及 Plan、Plan Task、Execution Task 和事件关联信息；`-detail` 再追加 call、path 等执行元数据。
 
 ## 本机终端观测
 
@@ -826,7 +698,7 @@ Quick Tunnel 适合临时开发和连通性验证；Cloudflare 官方说明 Quic
 ```text
 -history int       回放最近事件数量，范围 1-100，默认 100
 -format text|json  文本或一行一个 JSON 事件，默认 text
--detail            显示语义用途、操作 ID 和执行事实
+-detail            显示语义用途、关联 ID 和执行事实
 -diff summary|preview|full  默认 full
 -tool string       按工具过滤
 -status string     按事件状态过滤
@@ -859,10 +731,10 @@ Quick Tunnel 适合临时开发和连通性验证；Cloudflare 官方说明 Quic
 - 命令输出行号使用 muted 色，stdout 弱化（dim）、stderr 黄色；
 - 支持真彩色终端时全部语义色升级为 true-color 变体，普通终端降级 ANSI 16 色，`NO_COLOR=1` 或非终端完全无色。
 
-ARC 内容仍先显示 `Read`、`Edited`、`Ran`、`Searched` 等语义动作，再按实际存在的字段显示 Context（`purpose`、最新 Activity、Plan / Task / Operation 关联信息）、执行事实和结果；命令 stdout/stderr 带行号。内部 `operation.*` 调度事件、重复的远端 `*.started`/`*.completed` notice 默认静默，只保留失败、取消等对人有用的最终结果。ARC 人类展示层继续按工具和状态使用稳定 ANSI 颜色，Diff 默认完整（`-diff full`），区分新增、删除和上下文；支持真彩色终端时使用真彩色，普通终端降级 ANSI 16 色。设置 `NO_COLOR=1` 可关闭颜色，`COLORTERM=truecolor` 或 `24bit` 启用真彩色；非终端（管道/重定向）自动关闭颜色。
+ARC 内容仍先显示 `Read`、`Edited`、`Ran`、`Searched` 等语义动作，再按实际存在的字段显示 Context（`purpose`、最新 Activity、Plan / Task 关联信息）、执行事实和结果；命令 stdout/stderr 带行号。重复的远端 `*.started`/`*.completed` notice 默认静默，只保留失败、取消等对人有用的最终结果。ARC 人类展示层继续按工具和状态使用稳定 ANSI 颜色，Diff 默认完整（`-diff full`），区分新增、删除和上下文；支持真彩色终端时使用真彩色，普通终端降级 ANSI 16 色。设置 `NO_COLOR=1` 可关闭颜色，`COLORTERM=truecolor` 或 `24bit` 启用真彩色；非终端（管道/重定向）自动关闭颜色。
 
-`-detail` 会追加 operation、call、path 等执行元数据；默认视图只展示必要事实，避免与事件行重复。机器处理、重定向或管道场景也可直接使用默认 `text` 模式，或选择 `--format json` 获取无格式的完整事件。
-事件中保留 `event_id`、`sequence`、`request_id`、`operation_id`、`plan_task_id`、
+`-detail` 会追加关联、call、path 等执行元数据；默认视图只展示必要事实，避免与事件行重复。机器处理、重定向或管道场景也可直接使用默认 `text` 模式，或选择 `--format json` 获取无格式的完整事件。
+事件中保留 `event_id`、`sequence`、`request_id`、关联 ID、`plan_task_id`、
 `execution_task_id`、`edit_id`、状态、耗时、路径、命令和截断标志等字段。
 
 ## 安全与数据边界
@@ -890,16 +762,14 @@ ARC 内容仍先显示 `Read`、`Edited`、`Ran`、`Searched` 等语义动作，
 
 ```text
 cmd/mcpx-server       服务入口、后台模式、observe、workspace、oauth-register 和 update
-internal/server       HTTP Gateway、21 个公开工具、Resource、capability 与协议适配
-internal/desktop      Windows 托盘、图形界面与其 /api 处理器（非 Windows 为占位实现）
+internal/server       HTTP Gateway、15 个公开工具、Resource、capability 与协议适配
 internal/arc          ARC 2.0 结果契约、structuredContent、呈现与 trace metadata
 internal/remotesession Remote Session、角色、handoff 与持久化事件
 internal/edit         Edit 解析、原子写、格式保留和变更摘要
 internal/deletion     move_out 请求、确认凭据和安全移出状态
-internal/operation    异步 Operation、依赖调度和结果分页
 internal/terminal     Execution Task 生命周期、日志、端口和诊断
 internal/source       搜索、列表、上下文和批量读取
-internal/environment  主机/工具链环境检查、快照与比较
+internal/screenshot    屏幕截图与 MCP 图像/产物返回
 internal/observation  事件存储、本机观测、Activity 和终端渲染
 internal/auth         Bearer、OAuth、Principal 和 ACL
 internal/config       全局/项目配置及 MCP/Skill 发现
@@ -953,20 +823,10 @@ git diff --check
 - `/sse` 或 `/mcp/sse` 返回 `404`：这是预期行为；请把客户端改为 Streamable HTTP `/mcp`。
 - 客户端看不到新工具：刷新 MCP Server，必要时新建客户端会话以重新获取工具表。
 - 截图失败：检查桌面会话、录屏权限和 Linux 截图后端。
-# Issue #823 操作状态补充
+## Issue #823：Workspace Git 身份推进
 
 带 `run_id` 的 Session Git 身份读取会在数据库中首次冻结 canonical path、remote 摘要、ref、HEAD/tree 与 Remote Session 关联。之后重新打开 Session 只接受相同身份，execute 的 expected_workspace 也必须匹配已冻结记录，不能通过传入刚观察到的新值绕过。
 
 需要推进候选时，先制作并审核不改变分支的 commit 对象，再以 `argv=["git","update-ref",完整冻结ref,新CommitSHA,旧HEAD]` 和 `workspace_transition={"operation_id":稳定ID,"head":新CommitSHA,"tree":精确treeSHA}` 执行。新 commit 必须仅以旧 HEAD 为父提交；Runtime 核对对象及命令，保留 before/after 与 Task 关联，只有持久 Task exit=0 且后置 GitIdentity 完整吻合才原子推进一次。返回 confirmed 的 workspace_post_identity 可用于下一步 push；若 Task 尚在运行，完成后再次打开同一 run/Session 或提交后续明确身份时进行回读恢复。
 
 没有执行回执、回读不同、执行失败或未知结果时不推进、不重新执行原 mutation。普通 git commit 后仅观察新 HEAD 不能成为证明；本合同用预制 commit 对象与带旧值条件的 update-ref 完成分支提交，避免在写入后猜测来源。该候选尚未通过独立 Runtime Review 或真实 Chat 验收。
-
-`operation_batch` 可由调用方提供稳定 `run_id` 与 `operation_id`，发送前应记录这两个值。请求丢失后恢复同一 ID 与完整计划，会返回原操作状态，不再次安排执行；只允许传输 request_id 改变，同 ID 的运行标识、Session、目的或步骤参数改变会拒绝。省略时服务端生成标识，但首次响应完全丢失时调用方无法依靠尚未取得的标识恢复，因此有副作用的可恢复调用应在发送前指定它们。
-
-结果保留期结束后，提交摘要仍随 Remote Session 保留。同 ID 请求返回 operation_result_expired，不能以新执行重建已过期结果。该标识只保证 Runtime 提交不重复；远端 GitHub 已发送效果仍须按其独立恢复账本回读，不能从本地 interrupted 推断远端未生效。
-
-异步 operation 状态回读提供 `state_sequence`、`state_event_id`；终态额外提供 `terminal_event_id`。同一 operation 的状态或步骤进度变化会推进序号，重复读取不改变序号。持久终态不能再改为另一终态或运行态；进程恢复将未结束操作原子地标记为 interrupted，其状态标识可在后续恢复中继续回读。旧记录迁移后的序号从当前快照 1 开始，不伪造历史事件。
-
-调用方应按 operation_id 和 state_sequence 处理可变状态更新，按 terminal_event_id 去重完成；时间较早或重复的状态不能覆盖较新的状态。取消请求返回不一定已经是终态，必须等待执行步骤实际退出；确认终态后无需继续等待。状态、步骤及序号通过同一读取事务返回，正常完成的聚合结果与终态一起写入。
-
-本候选新增数据库列和触发器。部署前需将数据库升级与可恢复性一并纳入候选 Review 和回滚方案；仅恢复旧 exe 不等于恢复旧数据库行为。该实现不判断 OpenAI Tunnel 的 not_seen/not_connected，也不保证进程中断时通知已送达；缺通知时须使用获准的有界状态回读。

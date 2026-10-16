@@ -5,12 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"testing"
 	"time"
 
-	"mcpx/internal/operation"
+	"mcpx/internal/terminal"
 	"mcpx/internal/winproc"
 )
 
@@ -64,13 +63,14 @@ func TestReviewCancelStopsGrandchildEffects(t *testing.T) {
 			}
 			ready := filepath.Join(s.WorkspacePath, "ready")
 			late := filepath.Join(s.WorkspacePath, "late")
-			accepted := callOperationTool(t, rt, "execute", map[string]any{"remote_session_id": s.ID, "purpose": "进程树取消故障复现", "action": "run", "execution_mode": "async", "yield_time_ms": 1, "argv": []any{executable, "-test.run=^TestReviewProcessTreeFixtureChild$", "--", "--review-process-tree", mode, ready, late}, "shell": false})
-			if accepted["status"] != "accepted" {
-				t.Fatalf("未提交: %+v", accepted)
+			started := callOperationTool(t, rt, "execute", map[string]any{"remote_session_id": s.ID, "purpose": "进程树取消故障复现", "action": "run", "yield_time_ms": 1, "argv": []any{executable, "-test.run=^TestReviewProcessTreeFixtureChild$", "--", "--review-process-tree", mode, ready, late}, "shell": false})
+			if started["status"] != "accepted" {
+				t.Fatalf("Task 未启动: %+v", started)
 			}
-			id := acceptedOperationID(accepted)
-			if id == "" {
-				t.Fatalf("operation id missing: %+v", accepted)
+			data, _ := started["data"].(map[string]any)
+			taskID, _ := data["execution_task_id"].(string)
+			if taskID == "" {
+				t.Fatalf("execution task id missing: %+v", started)
 			}
 			deadline := time.Now().Add(time.Second)
 			for {
@@ -82,8 +82,18 @@ func TestReviewCancelStopsGrandchildEffects(t *testing.T) {
 				}
 				time.Sleep(5 * time.Millisecond)
 			}
-			callOperationTool(t, rt, "operation_manage", map[string]any{"remote_session_id": s.ID, "operation_id": id, "action": "cancel"})
-			final, timeout, err := rt.operations.Wait(context.Background(), id, time.Second)
+			callOperationTool(t, rt, "execute", map[string]any{"remote_session_id": s.ID, "purpose": "停止进程树回归", "action": "stop", "execution_task_id": taskID})
+			task, err := rt.tasks.Get(s.ID, taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_ = task.Wait(waitCtx)
+			if task.StatusView()["status"] != terminal.TaskKilled {
+				t.Fatalf("Task stop did not reach killed state: %+v", task.StatusView())
+			}
+			time.Sleep(100 * time.Millisecond)
 			pidBytes, pidErr := os.ReadFile(ready)
 			pid, parseErr := strconv.Atoi(string(pidBytes))
 			if pidErr != nil || parseErr != nil {
@@ -91,19 +101,12 @@ func TestReviewCancelStopsGrandchildEffects(t *testing.T) {
 			}
 			alive, aliveErr := fixtureProcessAlive(pid)
 			if aliveErr != nil || alive {
-				t.Fatalf("取消后孙进程仍存活或无法核对: alive=%v err=%v", alive, aliveErr)
+				t.Fatalf("停止后孙进程仍存活或无法核对: alive=%v err=%v", alive, aliveErr)
 			}
-			// 无论断言如何，等待隔离子进程走完固定生命周期后再清理 fixture。
+			// Give the fixture time to attempt its delayed write after cancellation.
 			time.Sleep(1600 * time.Millisecond)
-			if err != nil || timeout || final.State != operation.StateCancelled {
-				t.Fatalf("取消未收敛: %s %v", final.State, err)
-			}
 			if _, err := os.Stat(late); !os.IsNotExist(err) {
-				t.Fatal("Operation cancelled 后孙进程仍产生文件效果")
-			}
-			stable, err := rt.operations.Get(context.Background(), id)
-			if err != nil || !reflect.DeepEqual(final, stable) {
-				t.Fatal("取消终态后仍被更改")
+				t.Fatal("停止 Task 后孙进程仍产生文件效果")
 			}
 		})
 	}

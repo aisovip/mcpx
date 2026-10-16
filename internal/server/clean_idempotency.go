@@ -26,7 +26,7 @@ func cleanIdempotencyFingerprint(operation string, payload map[string]any) strin
 	for key, value := range payload {
 		switch key {
 		case "idempotency_key", "user_confirmed", "confirmation_key", "confirmation_token", "client_request_id",
-			"request_id", "purpose", "intent", "progress_summary", "execution_mode":
+			"request_id", "purpose", "intent", "progress_summary":
 			// These fields are retry/auth/audit metadata, not the effect itself.
 		default:
 			canonical[key] = value
@@ -130,7 +130,7 @@ func cleanResultState(operation string, result *mcp.CallToolResult) string {
 // semantic preflight. A completed request replays its persisted result even if
 // the current Skill/MCP definition or argument schema changed; fresh and
 // pending requests Claim before preflight, so concurrent retries with the same
-// key merge here and only the durable owner needs the current environment.
+// key merge here and only the durable owner needs the current extension definition.
 func (r *Runtime) withCleanIdempotency(
 	ctx context.Context,
 	req *mcp.CallToolRequest,
@@ -191,7 +191,7 @@ func (r *Runtime) withCleanIdempotency(
 
 	// Fresh and pending requests Claim before semantic preflight so that
 	// concurrent retries with the same key merge here: only the durable owner
-	// resolves the current environment or starts an upstream process.
+	// resolves the current Skill/MCP definition or starts an upstream process.
 	claim, result := r.claimCleanIdempotency(ctx, envReq, session, operation, payload, key, fingerprint)
 	if result != nil {
 		return result, nil
