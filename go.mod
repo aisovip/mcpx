@@ -1,10 +1,10 @@
 module mcpx
 
-go 1.26.1
+go 1.27.2
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	golang.org/x/sys v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.44.3

@@ -33,7 +33,7 @@ cd mcpx
 go build -o bin/mcpx ./cmd/mcpx-server
 ```
 
-MCPX requires **Go 1.26.1 or later**; the exact development version is defined by `go.mod`.
+MCPX requires **Go 1.27.2 or later**; the exact development version is defined by `go.mod`.
 
 ### 2. Start
 
